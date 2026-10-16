@@ -47,18 +47,6 @@ not the answer for a key that can move funds.
 4. **butler-skills:** `acp wallet sign-typed-data` classed as a money command in
    `SKILL_STANDARD.md`.
 
-## Tested
-
-Against production on 2026-10-15, with a throwaway wallet:
-- deposit through the proxy;
-- session-key registration, both from a script and through the helper with a
-  viem-signed registration (the same hashing bevo-server uses);
-- a $10 x 100 BTC open and close;
-- the helper's session-key signature, accepted by the relayer.
-
-Withdrawal is built but unproven: that wallet still owes the 1 USDC activation fee. The
-full API notes are in virtuals-agent's `research_notes/papertrade-relayer-api.md`.
-
 ## Validating a change
 
 ```sh

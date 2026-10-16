@@ -1,7 +1,7 @@
 ---
 name: papertrade-xyz
 description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, and withdraw - with a session key Butler keeps.
-version: 1.0.1
+version: 1.1.0
 metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
 ---
 
@@ -17,9 +17,9 @@ where every trade faces Papertrade's own pool at Hyperliquid's mid price:
 - **Open** - "long BTC 100x with $20": steps 4 to 6 (`quote` first, always).
 - **Close** - "close my BTC long": step 7. Never wait for anything to close.
 - **Withdraw** - "take my money out of Papertrade": step 8.
+- **Automate** - "close it at -$5": a duty (`references/duty.md`).
 
-Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit orders
-(Papertrade has none), or a market `markets` does not list.
+Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` does not list.
 
 ## Before you start
 
@@ -100,10 +100,10 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    ```
 
    No amount, or refused: say its `why` and ask for at least `sendAtLeastUsd`; never
-   offer a smaller one. Use the
-   plan's `amountUsd` and `depositAddress` exactly; never another chain than `1337`. The
-   reply is a card; once it confirms (step 9, `--route trade`), read `account` until
-   `availableUsd` rises (`pendingDepositUsd` is what still waits).
+   offer a smaller one. Use the plan's `amountUsd` and `depositAddress` exactly; never
+   another chain than `1337`. The reply is a card; once it confirms (step 9,
+   `--route trade`), read `account` until `availableUsd` rises (`pendingDepositUsd`
+   still waits).
 
 4. [ADAPT] Quote it with the owner's own numbers. It signs nothing, and refuses anything
    under Papertrade's minimums or over `availableUsd`; give its reason as written:
@@ -208,7 +208,7 @@ python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 
 | Answer | What to do |
 | --- | --- |
-| `admission_rejected` + `noDeposit` | Fund first (step 3). |
+| `admission_rejected` + `noDeposit` | Fund first (step 3), then register (step 2). |
 | `admission_rejected` + `funding` | Not enough available; re-read `account` and say so. |
 | `admission_rejected` + `belowMinimum`, `belowMinimumNotional`, `leverageTooHigh`, `positionTooLarge`, `openInterest` | Give the reason and ask; never resize it yourself. |
 | `admission_rejected` + `tradingPaused`, `marketPaused`, `inactiveInstrument` | Not taking that trade now; closing still works. |
@@ -225,10 +225,10 @@ python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 ## Limits
 
 - **Markets:** those `markets` lists `openable` (BTC, ETH today).
-- **No stop-loss or take-profit.** Liquidation takes the whole margin at the bust price.
+- **No stop-loss or take-profit on Papertrade;** a duty can close at a level
+  (`references/duty.md`).
 - **Fees:** a small haircut plus 2% of a winning close's gain; a loss costs nothing extra.
 - **Deposits** come from the owner's USDC through `acp trade` only.
-- **Chat only.** A duty cannot use this session key.
 - **Papertrade's API is unpublished:** an answer unlike `references/api.md` means it
   changed; stop and say so.
 

@@ -10,7 +10,8 @@ own signature, through an approval card.
 `~/.papertrade/session-key.json`, made by `key-new` and readable only by its owner. The
 helper reads it to sign and never prints it. Never open, `cat`, copy, move, upload or paste
 it, and never put it in a message, a note or a duty. Anyone holding it can trade, and lose,
-the owner's Papertrade balance.
+the owner's Papertrade balance. A duty signs with it only by running the helper's copy
+beside it (`references/duty.md`), never by reading the file.
 
 ## What `sessionKey.action` means
 
@@ -21,6 +22,9 @@ the owner's Papertrade balance.
 | `register` | not registered on-chain, or expired | register it; nothing can open **or close** until the owner approves |
 | `key-new` | no key on this butler | `key-new` once, then register |
 | `fund-first` | the account has never had a deposit; Papertrade takes no key before one (`noDeposit`) | no card: fund it, then register once `account` shows the deposit |
+
+In a duty, every `action` but `ready` and `renew` stops its opens and closes, and `todo`
+says to notify the owner: a duty never makes a key or files a card.
 
 Registering the same key again resets its 30 days; measured on Papertrade, with the
 expiry moving forward and the key never interrupted. **There is never a reason to make a

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.0
+
+- **From a duty:** a duty reads the account and closes (or opens) with the same session
+  key, with no card: `duty-helper` gives the path it runs, a copy of the helper beside the
+  key that every chat run keeps current. `references/duty.md` has a stop-loss and
+  take-profit duty, tested against Papertrade. A duty never makes a key, renews one,
+  withdraws or files an owner card; the helper refuses those there, and a key that is not
+  usable makes a duty notify the owner rather than ask for a card.
+- **One writer at a time.** A chat and a duty share the key file, so a nonce is taken and
+  the file written under a lock, each write through its own temporary file. Without it,
+  three processes racing on one file reused 12 of 450 nonces and lost 269 writes.
+
 ## 1.0.1
 
 - **Fund before the key.** Papertrade refuses a session-key registration with `noDeposit`

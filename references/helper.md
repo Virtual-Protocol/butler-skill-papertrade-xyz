@@ -12,6 +12,7 @@ python3 /tmp/papertrade.py markets
 python3 /tmp/papertrade.py account --owner <OWNER>
 python3 /tmp/papertrade.py deposit-plan --owner <OWNER> --amount 20
 python3 /tmp/papertrade.py key-status --owner <OWNER>
+python3 /tmp/papertrade.py duty-helper --owner <OWNER>
 python3 /tmp/papertrade.py key-new --owner <OWNER>
 python3 /tmp/papertrade.py register-typed-data --owner <OWNER>
 python3 /tmp/papertrade.py register-body --owner <OWNER> --signature <SIGNATURE>
@@ -34,6 +35,8 @@ the command line was wrong.
 | File | Holds |
 | --- | --- |
 | `~/.papertrade/session-key.json` (0600) | the session key: owner, address, private key, next nonce. **Never print, copy or move it** |
+| `~/.papertrade/papertrade.py` | a copy of this script, kept current by every chat run beside a key. A duty runs this copy, which finds the key from where it sits (`references/duty.md`) |
+| `~/.papertrade/.lock` | taken while a nonce is used or the key file written, so a chat and a duty never sign with the same nonce |
 | `~/.papertrade/config.json` | Papertrade's contract addresses, read from its app and checked on-chain, for a day |
 | `~/.papertrade/pending-*.json` | an owner step waiting for its signature |
 | `typedDataFile` (`/tmp/pt-<id>-typed.json`) | the typed data for `acp wallet sign-typed-data --data` |
@@ -54,8 +57,9 @@ match. A failure there means Papertrade changed its contracts; stop.
 | `markets` | the markets Papertrade lists, which are `openable`, `maxLeverage`, `maxPositionUsd`, and the minimums `minMarginUsd` / `minPositionUsd` |
 | `account` | the balance, open positions, deposit address, withdrawal limits and the session key's state (`references/account.md`) |
 | `deposit-plan` | the least to send so a deposit is credited (`sendAtLeastUsd`), counting USDC already waiting at the deposit address and the one-time 1 USDC fee to open it, with `why` to say to the owner. With `--amount`, refuses an amount that would sit uncredited, or confirms it with `amountUsd` and `depositAddress` for the `acp trade` |
-| `key-status` | `action`: `ready`, `renew` (under a day left), `register`, `key-new`, or `fund-first` (the account never had a deposit, and Papertrade takes no key before one); `expiresIn`; and, whenever it is not `ready`, `todo`: the instruction to carry out in the same turn |
+| `key-status` | `action`: `ready`, `renew` (under a day left), `register`, `key-new`, or `fund-first` (the account never had a deposit, and Papertrade takes no key before one); `expiresIn`; and, whenever it is not `ready`, `todo`: the instruction to carry out in the same turn. In a duty, `todo` is to notify the owner, never a card |
 | `key-new` | makes a session key and prints only its address; refuses whenever one exists |
+| `duty-helper` | the path a duty runs (`helper`), for its `PAPERTRADE_HELPER` setting; refuses without a key |
 | `register-typed-data` / `register-body` | the owner's one signature that lets the key trade for 30 days |
 | `quote` | every check an open makes, signing nothing: `positionUsd`, `wipedOutAtMovePct`, `wipedOutNearPrice` (about; the real bust price sits a little before it), `markPrice`, and `badCase`, the sentence to say to the owner |
 | `open` | the same checks, then signs with the session key and writes the `bodyFile` |
@@ -64,6 +68,8 @@ match. A failure there means Papertrade changed its contracts; stop.
 | `cashflows` | deposits and withdrawals with their `status`; a withdrawal is done at `settled` |
 | `intents` | Papertrade's queue for the owner; with `--intent`, `stillQueued` for one request. Neither queued nor in `account` means it did not go through |
 | `withdraw-typed-data` / `withdraw-body` | the owner's signature for a withdrawal to their Hyperliquid account |
+
+A duty may run every command except `key-new`, `duty-helper` and the owner steps, which each need the owner and are refused there.
 
 The `-body` commands check that the signature recovers to the owner before writing the
 request; a signature from any other wallet is refused and nothing is written.
@@ -74,7 +80,9 @@ request; a signature from any other wallet is refused and nothing is written.
 """Papertrade helper: session key, signing and reads for the papertrade-xyz skill.
 
 Stdlib only. The session key lives in $HOME/.papertrade/session-key.json (0600)
-and never leaves this process: no command prints it. Owner signatures are not
+and never leaves this process: no command prints it. A chat keeps a copy of this
+script beside it, .papertrade/papertrade.py, which is what a duty runs: a duty's
+HOME is its own folder, so the copy finds the key from where it sits. Owner signatures are not
 made here; this prints the typed data for `acp wallet sign-typed-data` and
 assembles the request once the owner's signature comes back.
 
@@ -83,6 +91,7 @@ line `error: ...` on stderr. Exit 2: bad command line.
 """
 
 import argparse
+import fcntl
 import hashlib
 import hmac
 import json
@@ -101,9 +110,24 @@ HL_INFO = "https://api.hyperliquid.xyz/info"
 CHAIN_ID = 999
 DOMAIN_NAME = "String"  # Papertrade's EIP-712 domain name really is "String"
 DOMAIN_VERSION = "1"
-HOME = os.path.join(os.path.expanduser("~"), ".papertrade")
+# The runtime sets this for a duty's process; a duty never makes a key or files an owner card.
+IN_DUTY = os.environ.get("BEVO_SESSION_ID", "").startswith("agent:main:bevo:duty:")
+
+
+def _home():
+    if os.environ.get("PAPERTRADE_HOME"):
+        return os.environ["PAPERTRADE_HOME"]
+    here = os.path.dirname(os.path.abspath(__file__))
+    if os.path.basename(here) == ".papertrade":
+        return here
+    return os.path.join(os.path.expanduser("~"), ".papertrade")
+
+
+HOME = _home()
 KEY_FILE = os.path.join(HOME, "session-key.json")
 CONFIG_FILE = os.path.join(HOME, "config.json")
+LOCK_FILE = os.path.join(HOME, ".lock")
+DUTY_COPY = os.path.join(HOME, "papertrade.py")
 PENDING = os.path.join(HOME, "pending-{}.json")
 SCRATCH_DIR = "/tmp"
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
@@ -403,7 +427,7 @@ def _read_json(path):
 
 def _write_private(path, obj):
     os.makedirs(HOME, mode=0o700, exist_ok=True)
-    tmp = path + ".tmp"
+    tmp = f"{path}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         json.dump(obj, f)
@@ -459,6 +483,19 @@ def config(refresh=False):
 
 # ---- session key ----------------------------------------------------------------
 
+class _Locked:
+    """One writer at a time across processes: a chat and a duty share the key file, and a
+    nonce taken twice makes Papertrade refuse the second intent."""
+
+    def __enter__(self):
+        os.makedirs(HOME, mode=0o700, exist_ok=True)
+        self.fd = os.open(LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(self.fd, fcntl.LOCK_EX)
+
+    def __exit__(self, *exc):
+        os.close(self.fd)
+
+
 def _load_key(owner):
     k = _read_json(KEY_FILE)
     if not k or k.get("owner") != owner or not re.fullmatch(r"[0-9a-f]{64}", str(k.get("privateKey", ""))):
@@ -466,11 +503,25 @@ def _load_key(owner):
     return k
 
 
-def _take_nonce(k):
-    n = int(k["nextNonce"])
-    k["nextNonce"] = str(n + 1)
-    _write_private(KEY_FILE, k)
+def _take_nonce(owner):
+    with _Locked():
+        k = _load_key(owner)
+        if not k:
+            raise Refused("the session key file changed while building; nothing was signed")
+        n = int(k["nextNonce"])
+        k["nextNonce"] = str(n + 1)
+        _write_private(KEY_FILE, k)
     return n
+
+
+def _ever_funded(owner):
+    """Papertrade refuses a key for an account that never had a deposit (`noDeposit`).
+    Any cashflow means a deposit came first. An unreadable answer counts as funded: the
+    registration then meets Papertrade's own refusal rather than none at all."""
+    try:
+        return bool(api_get(f"/query/accounts/{owner}/cashflows?limit=75").get("items"))
+    except Refused:
+        return True
 
 
 def _onchain_expiry(cfg, owner, address):
@@ -486,20 +537,15 @@ def _left(seconds):
     return f"{max(seconds, 0) // 60} minutes"
 
 
-def _ever_funded(owner):
-    """Papertrade refuses a session key for an account that never had a deposit (`noDeposit`),
-    and any cashflow means a deposit came first. An unreadable answer counts as funded: the
-    registration then meets Papertrade's own refusal rather than none at all."""
-    try:
-        return bool(api_get(f"/query/accounts/{owner}/cashflows?limit=75").get("items"))
-    except Refused:
-        return True
+DUTY_BLOCKED = ("The session key is not usable, so this duty can neither open nor close. A duty "
+                "cannot fix that: notify the owner once (bevo.notify) to renew the Papertrade key in "
+                "a chat with Butler, and send nothing until key-status reads ready.")
 
 
 def key_status(owner, funded=None):
     """`action` is the one thing to do next: key-new, register (none on-chain, or expired),
-    renew (under a day left: register the same key again), fund-first (no deposit yet, and
-    Papertrade takes no key before one, so a card now could only be refused) or ready."""
+    renew (under a day left: register the same key again), fund-first (Papertrade takes no
+    key before the first deposit) or ready. In a duty, `todo` never asks for a card."""
     cfg = config()
     k = _load_key(owner)
     file_card = ("File the registration card now, in this turn: run register-typed-data, then "
@@ -507,33 +553,42 @@ def key_status(owner, funded=None):
                  "Never tell the owner a card is coming before it is filed.")
     expiry = _onchain_expiry(cfg, owner, k["address"]) if k else 0
     left = expiry - int(time.time())
-    if left <= 0 and not (funded if funded is not None else _ever_funded(owner)):
-        return {"key": k["address"] if k else None, "registered": False, "action": "fund-first",
-                "todo": ("Papertrade takes no session key before the account's first deposit, so file "
-                         "no card yet. A deposit comes first (SKILL.md step 3); once account shows it "
+    if left > 0:
+        st = {"key": k["address"], "registered": True, "expiresAt": expiry, "expiresIn": _left(left),
+              "action": "ready" if left > RENEW_BEFORE else "renew"}
+        if st["action"] == "renew":
+            st["todo"] = (f"The key still works but ends in {st['expiresIn']}. A duty cannot renew it: "
+                          "notify the owner once (bevo.notify) to renew it in a chat with Butler, and "
+                          "keep closing until then." if IN_DUTY
+                          else "The key still works but ends soon. " + file_card)
+        return st
+    st = {"key": k["address"] if k else None, "registered": False}
+    if k and expiry:
+        st["expiresAt"] = expiry
+    if IN_DUTY:
+        why = "" if k else f" No session key at {HOME}: run the copy duty-helper printed, never another one."
+        return {**st, "action": "register" if k else "key-new", "todo": DUTY_BLOCKED + why}
+    if not (funded if funded is not None else _ever_funded(owner)):
+        return {**st, "action": "fund-first",
+                "todo": ("Papertrade takes no session key before an account's first deposit, so file no "
+                         "card yet. Fund it first (SKILL.md step 3); once account shows the deposit "
                          "credited, this asks for the key.")}
     if not k:
-        return {"key": None, "registered": False, "action": "key-new",
-                "todo": "Run key-new once, then: " + file_card}
-    if left <= 0:
-        return {"key": k["address"], "registered": False, "expiresAt": expiry or None, "action": "register",
-                "todo": "Opens and closes are blocked until the owner approves. " + file_card}
-    if left <= RENEW_BEFORE:
-        return {"key": k["address"], "registered": True, "expiresAt": expiry, "expiresIn": _left(left),
-                "action": "renew", "todo": "The key still works but ends soon. " + file_card}
-    return {"key": k["address"], "registered": True, "expiresAt": expiry, "expiresIn": _left(left),
-            "action": "ready"}
+        return {**st, "action": "key-new", "todo": "Run key-new once, then: " + file_card}
+    return {**st, "action": "register",
+            "todo": "Opens and closes are blocked until the owner approves. " + file_card}
 
 
 def key_new(owner, rotate):
     # --rotate is for a human recovering a key Papertrade no longer accepts; the skill
     # never passes it: an expired or expiring key is registered again, never replaced.
-    if _load_key(owner) and not rotate:
-        raise Refused("a session key already exists; never make another. Register it again with register-typed-data")
-    priv = secrets.randbelow(_N - 1) + 1
-    k = {"owner": owner, "address": address_of(priv), "privateKey": "%064x" % priv,
-         "createdAt": int(time.time()), "nextNonce": str((secrets.randbelow(0xFFFFFF) + 1) * 256)}
-    _write_private(KEY_FILE, k)
+    with _Locked():
+        if _load_key(owner) and not rotate:
+            raise Refused("a session key already exists; never make another. Register it again with register-typed-data")
+        priv = secrets.randbelow(_N - 1) + 1
+        k = {"owner": owner, "address": address_of(priv), "privateKey": "%064x" % priv,
+             "createdAt": int(time.time()), "nextNonce": str((secrets.randbelow(0xFFFFFF) + 1) * 256)}
+        _write_private(KEY_FILE, k)
     return {"key": k["address"], "next": "register it: register-typed-data, then the owner's approval card"}
 
 
@@ -556,7 +611,7 @@ def owner_typed(owner, primary, extra, reading):
     k = _load_key(owner)
     if not k:
         raise Refused("no session key: run `key-new` first")
-    message = {"user": owner, **extra, "nonce": _take_nonce(k), "deadline": _now() + DEADLINE}
+    message = {"user": owner, **extra, "nonce": _take_nonce(owner), "deadline": _now() + DEADLINE}
     td = typed_data(cfg["exchange"], primary, message)
     typed_file = _scratch("typed", td)
     reading_file = _scratch("reading", reading(message))
@@ -614,7 +669,7 @@ def session_body(owner, primary, action, extra):
     if not st["registered"]:
         raise Refused("the session key is not registered or has expired: the owner must approve a "
                       "registration card first (register-typed-data); nothing was built")
-    message = {"user": owner, **extra, "nonce": _take_nonce(k), "deadline": _now() + DEADLINE}
+    message = {"user": owner, **extra, "nonce": _take_nonce(owner), "deadline": _now() + DEADLINE}
     digest = digest_of(cfg["exchange"], primary, message)
     sig = sign_digest(int(k["privateKey"], 16), digest)
     body_file = _scratch("body", {"action": action, "signed": {**wire(primary, message), **sig}})
@@ -882,6 +937,43 @@ def quote(owner, market, side, margin, leverage):
 
 # ---- command line ----------------------------------------------------------------
 
+# Each needs the owner: a key, an owner card, or the path a duty is filed with.
+OWNER_ONLY = {"key-new", "register-typed-data", "register-body", "withdraw-typed-data", "withdraw-body",
+              "duty-helper"}
+
+
+def _refresh_duty_copy():
+    """Keep .papertrade/papertrade.py identical to the helper a chat just extracted, so a
+    duty runs the current version. Only beside a key: without one a duty has nothing to sign."""
+    me = os.path.abspath(__file__)
+    if not os.path.isfile(KEY_FILE) or me == os.path.abspath(DUTY_COPY):
+        return
+    try:
+        with open(me, "rb") as f:
+            src = f.read()
+        try:
+            with open(DUTY_COPY, "rb") as f:
+                if f.read() == src:
+                    return
+        except OSError:
+            pass
+        tmp = f"{DUTY_COPY}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(src)
+        os.replace(tmp, DUTY_COPY)
+    except OSError:
+        pass
+
+
+def duty_helper(owner):
+    if not _load_key(owner):
+        raise Refused("no session key yet: register one first (SKILL.md step 2); a duty has nothing to sign with")
+    _refresh_duty_copy()
+    return {"helper": DUTY_COPY, "sessionKey": key_status(owner)["action"],
+            "next": "file the duty with this path in PARAMS as PAPERTRADE_HELPER (references/duty.md)"}
+
+
 def main(argv):
     p = argparse.ArgumentParser(prog="papertrade.py")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -916,11 +1008,17 @@ def main(argv):
         o.add_argument("--side", required=True, choices=["long", "short"])
         o.add_argument("--margin", required=True, type=float, help="USD of margin")
         o.add_argument("--leverage", required=True, type=int)
+    sub.add_parser("duty-helper").add_argument("--owner", required=True)
     c = sub.add_parser("close")
     c.add_argument("--owner", required=True)
     c.add_argument("--ids", required=True, help="comma-separated position ids, at most 12")
     a = p.parse_args(argv)
 
+    if IN_DUTY and a.cmd in OWNER_ONLY:
+        raise Refused(f"{a.cmd} needs the owner, and a duty never makes a key or files a card: notify "
+                      "the owner to do it in a chat with Butler")
+    if not IN_DUTY:
+        _refresh_duty_copy()
     if a.cmd == "config":
         return config(a.refresh)
     if a.cmd == "markets":
@@ -932,6 +1030,8 @@ def main(argv):
         return key_status(owner)
     if a.cmd == "key-new":
         return key_new(owner, a.rotate)
+    if a.cmd == "duty-helper":
+        return duty_helper(owner)
     if a.cmd == "register-typed-data":
         k = _load_key(owner)
         if not k:

@@ -5,8 +5,8 @@ trade BTC and ETH perpetuals on [Papertrade](https://papertrade.xyz). This READM
 the humans maintaining the repo and is never published to a butler. Only `SKILL.md` and
 `references/**/*.md` reach one.
 
-**Status: 0.1.0, not listed.** It needs the changes in "What it depends on" to ship
-first.
+**Status: 1.0.0; its listing (butler-skills#60) is a draft.** It waits for the changes in
+"What it depends on" to ship.
 
 ## What it does
 
@@ -38,26 +38,13 @@ not the answer for a key that can move funds.
 
 ## What it depends on
 
-1. **bevo-server `POST /butler-exec/sign`:** a generic EIP-712 signer for the owner's
-   wallet behind an approval card, read back through
-   `/butler-read/exec-requests/<key>?route=sign`.
-2. **virtuals-agent:** `acp wallet sign-typed-data` forwarded to it, and `sign` added
-   to `bevo-read request --route`.
+1. **bevo-server `POST /butler-exec/execute`, typed-data mode:** `typedData` instead of
+   `to`/`data`/`value` returns an EIP-712 signature behind an approval card, read back
+   through `/butler-read/exec-requests/<key>?route=execute`.
+2. **virtuals-agent:** `acp wallet sign-typed-data` forwarded to it.
 3. **bevo-app:** a card for a signature request in the approvals screen.
 4. **butler-skills:** `acp wallet sign-typed-data` classed as a money command in
    `SKILL_STANDARD.md`.
-
-## Tested
-
-Against production on 2026-10-15, with a throwaway wallet:
-- deposit through the proxy;
-- session-key registration, both from a script and through the helper with a
-  viem-signed registration (the same hashing bevo-server uses);
-- a $10 x 100 BTC open and close;
-- the helper's session-key signature, accepted by the relayer.
-
-Withdrawal is built but unproven: that wallet still owes the 1 USDC activation fee. The
-full API notes are in virtuals-agent's `research_notes/papertrade-relayer-api.md`.
 
 ## Validating a change
 

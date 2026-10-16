@@ -41,7 +41,7 @@ a close is never the first thing to find the key expired.
 2. `acp wallet sign-typed-data` with those files becomes an approval card. The owner sees
    that it lets Butler open and close Papertrade positions, that it cannot withdraw, the
    key's address, and its end date.
-3. `bevo-read request <KEY>:register --route sign` gives the signature once approved.
+3. `bevo-read request <KEY>:register --route execute` gives the signature once approved.
 4. `register-body` checks the signature is the owner's and writes the request.
 5. `curl` sends it. `key-status` shows `ready` about 30 seconds later.
 

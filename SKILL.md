@@ -1,7 +1,7 @@
 ---
 name: papertrade-xyz
 description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, and withdraw - with a session key Butler keeps.
-version: 0.4.0
+version: 1.0.0
 metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
 ---
 
@@ -168,7 +168,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
 9. [FIXED] Wait for a card's outcome; never file it again to find out:
 
    ```sh
-   bevo-read request <KEY>:<OP> --route sign
+   bevo-read request <KEY>:<OP> --route execute
    ```
 
    A card exists only once this finds it: run it right after filing, and never tell the

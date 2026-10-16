@@ -1,80 +1,59 @@
 # Changelog
 
-## 0.4.0
+## 1.0.0
 
-- **`history`: closed positions and their PnL.** It reads Papertrade's own
-  `/query/accounts/<owner>/trades` and computes each result the way Papertrade's app does:
-  the adjusted PnL less the fee paid, with a liquidation counted as minus the whole margin.
-  It returns a `summary` of wins, losses, liquidations and totals. Measured on production
-  against the test wallet's one closed trade, and against synthetic win, loss and
-  liquidation rows.
-- **Pagination follows `nextCursor`** 75 at a time, up to `--limit` (200 at most). A
-  cursor Papertrade repeats ends the read and marks it incomplete (`more: true`), never
-  "every closed trade". Tested against a simulated 180-trade, 3-page history.
-- **`cashflows`: deposits and withdrawals with their status.** A withdrawal is reported
-  done only at `settled`, never at the 201 that queued it.
-- The skill gains a History intent and a settled check on withdrawals. Wording was trimmed
-  elsewhere to stay under the 12,000-character body.
+First release: trade BTC and ETH perpetuals on Papertrade (papertrade.xyz).
 
-## 0.3.0
+**What it does**
 
-- **`deposit-plan` decides how much to deposit.** It reads what already waits at the
-  owner's deposit address and whether its HyperCore account is open, then answers the
-  least to send (`sendAtLeastUsd`) and a `why` to say.
-  - Formula: the missing part of 10 USDC, plus the 1 USDC fee to open the account, plus a
-    1 USDC margin for Relay's bridge fee, never under the trading bot's 5 USDC floor.
-  - Given an amount, it refuses one that would sit at the address uncredited.
-  - Before this the skill said "send at least 13 the first time, 11 after", which the
-    agent applied by hand and could not check.
-  - Measured: Papertrade's app refuses any deposit arriving under 10 USDC, while the
-    protocol simply leaves a smaller one waiting until the total reaches 10.
-- `account` reports `pendingDepositUsd`, so money waiting at the deposit address is shown
-  as waiting, never as missing.
-- **A card exists only once `bevo-read request` finds it.** Haiku twice told an owner a
-  card was waiting when the command that would have filed it never ran (a renewal; a
-  deposit blocked by its environment). The agent now reads the card back before saying
-  so, and `not_found` is reported as nothing filed.
-- A refused deposit amount is answered with `sendAtLeastUsd`, never a smaller offer.
+- **Look:** balance and open positions; `account` reads the chain directly.
+- **Fund:** `deposit-plan`, then `acp trade --chain-out 1337 --recipient <deposit address>`.
+  The plan counts what already waits at the deposit address, the one-time 1 USDC fee to
+  open its HyperCore account, and a 1 USDC bridge margin, never under the trading bot's
+  5 USDC floor. It refuses an amount that would sit uncredited, and `account` reports
+  `pendingDepositUsd`.
+- **Open:** `quote` first, which signs nothing and supplies `badCase`. Then `open`, signed
+  by a session key, and a `curl` to Papertrade's relayer.
+- **Close:** with no card, so a close is never delayed.
+- **Withdraw:** `WithdrawToCore`, signed by the owner through `acp wallet sign-typed-data`
+  (an approval card), to the owner's own Hyperliquid account. It counts as done at
+  `cashflows` `settled`.
+- **History:** `history` lists closed positions with PnL exactly as Papertrade's app
+  computes it: the adjusted PnL less the fee, and minus the margin for a liquidation.
+  `cashflows` lists deposits and withdrawals. Both follow `nextCursor`, and a repeated
+  cursor is reported as incomplete.
 
-## 0.2.0
+**Design, and why**
 
-- **Renewal a day ahead, on every read.** `sessionKey.action` is `renew` with under a day
-  left, and the skill asks for the renewal whatever the owner asked about. A close should
-  never be the first thing to find the key expired, because renewal waits on an approval
-  card.
-- **The same key is registered again; never a second one.** Measured: re-registering a
-  live key moved its expiry forward a full 30 days. `key-new` now refuses whenever a key
-  exists, and the skill never passes `--rotate`.
-- **Every build writes its own files** (`/tmp/pt-<id>-body.json` and the rest) and prints
-  their paths. Fixed `/tmp/pt_body.json` let two conversations building at once send
-  each other's request.
-- **The helper is extracted, never retyped:** step 1 runs `awk` over
-  `references/helper.md`. That saves about 8k output tokens a turn, and a smaller model
-  can no longer alter the code while copying it.
-- **Owner cards carry a reading** (`--reading`) computed by the helper from the signed
-  message: what the key can and cannot do, the amount and where a withdrawal goes.
-- `curl` prints the HTTP status; closes say what to do when the key is not usable.
-- **`quote` before every offer.** It runs every check an open makes and signs nothing. It
-  gives the owner `badCase` word for word, `positionUsd` and `wipedOutNearPrice`. In
-  tests, agents without it computed the bad case themselves, and `open` was the only
-  command that printed it, after it had already signed.
-- **"Accepted but not landed"** (`intents --intent`): a `201` that never shows up in
-  `account` is checked against Papertrade's queue, so it is reported as still queued or
-  as did-not-go-through, never re-sent or rebuilt by the agent alone.
-- **The helper writes the sentences a model kept getting wrong:**
-  - `withdrawNote`: when nothing can be withdrawn. Haiku offered "$9.72 now" against a $10
-    minimum.
-  - `sessionKey.todo`: whenever the key is not `ready`. Haiku told the owner to approve a
-    renewal "when prompted" and filed no card.
-- Step 1 runs before any reply, refusals included. Approving a key card is never a yes
-  to a trade.
+- **A session key signs opens and closes.** Papertrade refuses an owner-signed trade
+  (`403 unauthorized_intent`, measured). The key cannot withdraw. It lives in
+  `~/.papertrade/session-key.json`, outside the skill directory that `hub_update`
+  replaces, and is never printed.
+- **Renewal a day ahead, on every read.** It needs an owner card. Re-registering the same
+  key extends it a full 30 days (measured), so a second key is never made.
+- **The helper is extracted with `awk`, never retyped.** That saves about 8k output tokens
+  a turn, and keeps the code byte-identical to the tested script.
+- **Every build writes its own files** (`/tmp/pt-<id>-*.json`), so two conversations never
+  send each other's request.
+- **The helper writes the sentences smaller models got wrong in testing:**
+  - `badCase`, from `quote`;
+  - `withdrawNote`, when nothing can be withdrawn;
+  - `sessionKey.todo`, when the key needs an owner card;
+  - `deposit-plan`'s `why`;
+  - owner cards' `--reading`.
+- **A card exists only once `bevo-read request` finds it.** In tests an agent claimed
+  cards it never filed.
+- **"Accepted but not landed"** (`intents --intent`): a `201` that never appears is
+  reported as still queued or as did-not-go-through, and is never re-sent.
+- **Papertrade's contract address is read from its app** and refused unless the chain
+  agrees, both the session-key manager and the EIP-712 domain.
 
-## 0.1.0
+**Tested**
 
-- First version: look, fund, open, close and withdraw on Papertrade's BTC and ETH
-  perpetuals.
-- A session key kept in `~/.papertrade/session-key.json` signs opens and closes. The owner's
-  wallet signs registration and withdrawals through `acp wallet sign-typed-data`.
-- Deposits go through `acp trade --chain-out 1337 --recipient <deposit address>`.
-- The helper reads Papertrade's contract address from its app and refuses it unless the
-  chain agrees.
+- Against Papertrade production with a throwaway wallet:
+  - a deposit;
+  - registering a key, and re-registering it;
+  - a $10 × 100 BTC open and close;
+  - the history and cashflow reads.
+- Agent runs on Sonnet and Haiku with sandboxed platform commands.
+- Not yet run live: a withdrawal.

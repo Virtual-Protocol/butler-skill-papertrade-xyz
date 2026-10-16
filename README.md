@@ -5,8 +5,8 @@ trade BTC and ETH perpetuals on [Papertrade](https://papertrade.xyz). This READM
 the humans maintaining the repo and is never published to a butler. Only `SKILL.md` and
 `references/**/*.md` reach one.
 
-**Status: 0.1.0, not listed.** It needs the changes in "What it depends on" to ship
-first.
+**Status: 1.0.0; its listing (butler-skills#60) is a draft.** It waits for the changes in
+"What it depends on" to ship.
 
 ## What it does
 

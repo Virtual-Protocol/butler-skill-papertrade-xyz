@@ -168,7 +168,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
 9. [FIXED] Wait for a card's outcome; never file it again to find out:
 
    ```sh
-   bevo-read request <KEY>:<OP> --route sign
+   bevo-read request <KEY>:<OP> --route execute
    ```
 
    A card exists only once this finds it: run it right after filing, and never tell the

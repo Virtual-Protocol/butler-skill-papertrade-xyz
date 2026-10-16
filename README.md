@@ -38,11 +38,10 @@ not the answer for a key that can move funds.
 
 ## What it depends on
 
-1. **bevo-server `POST /butler-exec/sign`:** a generic EIP-712 signer for the owner's
-   wallet behind an approval card, read back through
-   `/butler-read/exec-requests/<key>?route=sign`.
-2. **virtuals-agent:** `acp wallet sign-typed-data` forwarded to it, and `sign` added
-   to `bevo-read request --route`.
+1. **bevo-server `POST /butler-exec/execute`, typed-data mode:** `typedData` instead of
+   `to`/`data`/`value` returns an EIP-712 signature behind an approval card, read back
+   through `/butler-read/exec-requests/<key>?route=execute`.
+2. **virtuals-agent:** `acp wallet sign-typed-data` forwarded to it.
 3. **bevo-app:** a card for a signature request in the approvals screen.
 4. **butler-skills:** `acp wallet sign-typed-data` classed as a money command in
    `SKILL_STANDARD.md`.

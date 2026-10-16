@@ -47,8 +47,9 @@ a registration up to 20. States after that: `prepared`, `confirmed`, `failed`,
 | 4xx | `{"code":"invalid_intent"}` / `deadline_expired` / `below_minimum_withdrawal` | as named |
 | 429 | `{"code":"rate_limited"}` | too many requests; wait |
 
-Seen live: `registerSessionKey` before any deposit answers `noDeposit`; a withdrawal
-asking for the whole balance when a 1 USDC activation fee applies answers `funding`.
+`registerSessionKey` for an account with no deposit yet answers `noDeposit`. A withdrawal
+answers `funding` when it asks for more than the balance holds: the whole balance while a
+1 USDC activation fee is owed on top, or a balance rounded up past its 18-decimal value.
 
 ## POST /funding/deposits/check
 

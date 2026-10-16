@@ -775,15 +775,21 @@ def account(owner):
         })
     deposit = deposit_state(owner)
     funding = api_get(f"/query/accounts/{owner}/funding")
-    withdrew = any(str(i.get("kind", i.get("type", ""))).lower().startswith("withdraw") for i in funding.get("items", []))
+    # Papertrade's own rule: the 1 USDC activation is charged only to an owner with no
+    # HyperCore account who has never withdrawn. Every /funding item is a withdrawal.
+    withdrew = any(i.get("status") != "failed" for i in funding.get("items", []))
     fee = 0 if funding.get("coreAccount") or withdrew else 1
-    available = balance / WAD  # balances() already leaves out margin locked in positions
+    # balances() already leaves out margin locked in positions. It carries 18 decimals and a
+    # withdrawal asks in USDC's 6, so this rounds down: rounded up, a full withdrawal asks for
+    # dust more than the balance holds, and Papertrade refuses it as `funding`.
+    available_micro = balance // (WAD // USDC)
+    available = available_micro / USDC
     return {
-        "owner": owner, "availableUsd": round(available, 6), "positions": positions,
+        "owner": owner, "availableUsd": available, "positions": positions,
         "depositAddress": deposit["depositAddress"], "pendingDepositUsd": deposit["pendingUsd"],
         "hyperCoreAccount": bool(funding.get("coreAccount")),
         "withdrawActivationFeeUsd": fee, "minWithdrawUsd": 10,
-        "maxWithdrawUsd": max(0.0, round(available - fee, 6)),
+        "maxWithdrawUsd": max(0, available_micro - fee * USDC) / USDC,
         "withdrawNote": _withdraw_note(available, fee),
         "sessionKey": key_status(owner, funded=True if available > 0 or positions else None),
     }
@@ -1039,10 +1045,13 @@ def main(argv):
         if a.amount < 10:
             raise Refused("Papertrade's minimum withdrawal is 10 USDC")
         acct = account(owner)
-        if a.amount > acct["maxWithdrawUsd"] + 1e-9:
-            raise Refused(f"at most {acct['maxWithdrawUsd']} USDC can be withdrawn now "
-                          f"(available {acct['availableUsd']}, activation fee {acct['withdrawActivationFeeUsd']})")
-        return owner_typed(owner, "WithdrawToCore", {"amount": int(round(a.amount * USDC))},
+        amount = int(round(a.amount * USDC))
+        if amount > int(round(acct["maxWithdrawUsd"] * USDC)):
+            fee = acct["withdrawActivationFeeUsd"]
+            raise Refused(f"at most {acct['maxWithdrawUsd']} USDC can be withdrawn now: {acct['availableUsd']} "
+                          f"is available" + (f", and the first withdrawal pays a one-time {fee:g} USDC "
+                                             f"activation fee on top" if fee else ""))
+        return owner_typed(owner, "WithdrawToCore", {"amount": amount},
                            withdraw_reading(acct["withdrawActivationFeeUsd"]))
     if a.cmd == "withdraw-body":
         return owner_body(owner, "WithdrawToCore", a.signature, "withdrawToCore", {"withdrawal": {"route": "hypercore"}})

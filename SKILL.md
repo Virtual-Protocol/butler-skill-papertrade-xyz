@@ -1,7 +1,7 @@
 ---
 name: papertrade-xyz
 description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, and withdraw - with a session key Butler keeps.
-version: 1.0.0
+version: 1.1.0
 metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
 ---
 
@@ -148,8 +148,10 @@ Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` doe
    registration (step 2) at once; the close waits for the owner.
 
 8. [FIXED] Withdraw only when asked, at most `maxWithdrawUsd` and at least 10. It lands
-   on the owner's Hyperliquid account. If `account` has a `withdrawNote`, nothing can go
-   out: say it word for word and file nothing; never offer a smaller amount.
+   in their Hyperliquid account. A first withdrawal can owe a one-time 1 USDC activation
+   fee (`withdrawActivationFeeUsd`) on top; `maxWithdrawUsd` already leaves it out. Say
+   so first. If `account` has a `withdrawNote`, say it word for word and file
+   nothing; never offer a smaller amount.
 
    ```sh
    python3 /tmp/papertrade.py withdraw-typed-data --owner <OWNER> --amount <USDC>
@@ -226,8 +228,6 @@ python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 - **No stop-loss or take-profit on Papertrade;** a duty can close at a level
   (`references/duty.md`).
 - **Fees:** a small haircut plus 2% of a winning close's gain; a loss costs nothing extra.
-- **Withdrawals:** at least 10 USDC, plus 1 USDC the first time unless the owner has a
-  Hyperliquid account; `maxWithdrawUsd` includes it.
 - **Deposits** come from the owner's USDC through `acp trade` only.
 - **Papertrade's API is unpublished:** an answer unlike `references/api.md` means it
   changed; stop and say so.

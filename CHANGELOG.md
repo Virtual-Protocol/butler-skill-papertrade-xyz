@@ -15,6 +15,12 @@ First release: trade BTC and ETH perpetuals on Papertrade (papertrade.xyz).
 - **Open:** `quote` first, which signs nothing and supplies `badCase`. Then `open`, signed
   by a session key, and a `curl` to Papertrade's relayer.
 - **Close:** with no card, so a close is never delayed.
+- **From a duty:** a duty reads the account and closes (or opens) with the same session
+  key, with no card: `duty-helper` gives the path it runs, a copy of the helper beside the
+  key that every chat run keeps current. `references/duty.md` has a stop-loss and
+  take-profit duty, tested against Papertrade. A duty never makes a key, renews one,
+  withdraws or files an owner card; the helper refuses those there, and a key that is not
+  usable makes a duty notify the owner rather than ask for a card.
 - **Withdraw:** `WithdrawToCore`, signed by the owner through `acp wallet sign-typed-data`
   (an approval card), to the owner's own Hyperliquid account. It counts as done at
   `cashflows` `settled`.
@@ -31,6 +37,12 @@ First release: trade BTC and ETH perpetuals on Papertrade (papertrade.xyz).
   replaces, and is never printed.
 - **Renewal a day ahead, on every read.** It needs an owner card. Re-registering the same
   key extends it a full 30 days (measured), so a second key is never made.
+- **No key before the first deposit.** Papertrade refuses one with `noDeposit`
+  (measured), so `key-status` answers `fund-first` for an account with no cashflow yet,
+  and no card is filed that could only be refused.
+- **One writer at a time.** A chat and a duty share the key file, so a nonce is taken and
+  the file written under a lock, each write through its own temporary file. Without it,
+  three processes racing on one file reused 12 of 450 nonces and lost 269 writes.
 - **The helper is extracted with `awk`, never retyped.** That saves about 8k output tokens
   a turn, and keeps the code byte-identical to the tested script.
 - **Every build writes its own files** (`/tmp/pt-<id>-*.json`), so two conversations never

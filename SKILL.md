@@ -17,9 +17,9 @@ where every trade faces Papertrade's own pool at Hyperliquid's mid price:
 - **Open** - "long BTC 100x with $20": steps 4 to 6 (`quote` first, always).
 - **Close** - "close my BTC long": step 7. Never wait for anything to close.
 - **Withdraw** - "take my money out of Papertrade": step 8.
+- **Automate** - "close it at -$5": a duty (`references/duty.md`).
 
-Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit orders
-(Papertrade has none), or a market `markets` does not list.
+Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` does not list.
 
 ## Before you start
 
@@ -67,6 +67,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
      about something else, so a close never waits for one.
    - `register` - not usable: none on-chain, or expired. Opens **and closes** wait for it.
    - `key-new` - no key yet: run `key-new` once, then register it.
+   - `fund-first` - never funded: no card yet; fund it (step 3).
 
    Register (also for `renew`; it is the same key again):
 
@@ -99,10 +100,10 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    ```
 
    No amount, or refused: say its `why` and ask for at least `sendAtLeastUsd`; never
-   offer a smaller one. Use the
-   plan's `amountUsd` and `depositAddress` exactly; never another chain than `1337`. The
-   reply is a card; once it confirms (step 9, `--route trade`), read `account` until
-   `availableUsd` rises (`pendingDepositUsd` is what still waits).
+   offer a smaller one. Use the plan's `amountUsd` and `depositAddress` exactly; never
+   another chain than `1337`. The reply is a card; once it confirms (step 9,
+   `--route trade`), read `account` until `availableUsd` rises (`pendingDepositUsd`
+   still waits).
 
 4. [ADAPT] Quote it with the owner's own numbers. It signs nothing, and refuses anything
    under Papertrade's minimums or over `availableUsd`; give its reason as written:
@@ -144,7 +145,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    ```
 
    No card while the key is usable. If `close` says it is not registered, file the
-   registration (step 2) at once; the close waits for the owner's approval.
+   registration (step 2) at once; the close waits for the owner.
 
 8. [FIXED] Withdraw only when asked, at most `maxWithdrawUsd` and at least 10. It lands
    on the owner's Hyperliquid account. If `account` has a `withdrawNote`, nothing can go
@@ -175,8 +176,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    owner a card is waiting before it does. `not_found` - nothing was filed; say so.
    `approvalStatus: confirmed` - `approvalOutcome.signature` is the `<SIGNATURE>`.
    `rejected` or `failed` - nothing was signed; give the reason as written. `pending` -
-   still with the owner: say so and stop until they come back. The deposit's card is a
-   trade: `--route trade`.
+   still with the owner: say so and stop until they come back.
 
 ## Idempotency and retries
 
@@ -206,7 +206,7 @@ python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 
 | Answer | What to do |
 | --- | --- |
-| `admission_rejected` + `noDeposit` | Fund first (step 3). |
+| `admission_rejected` + `noDeposit` | Fund first (step 3), then register (step 2). |
 | `admission_rejected` + `funding` | Not enough available; re-read `account` and say so. |
 | `admission_rejected` + `belowMinimum`, `belowMinimumNotional`, `leverageTooHigh`, `positionTooLarge`, `openInterest` | Give the reason and ask; never resize it yourself. |
 | `admission_rejected` + `tradingPaused`, `marketPaused`, `inactiveInstrument` | Not taking that trade now; closing still works. |
@@ -223,12 +223,12 @@ python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 ## Limits
 
 - **Markets:** those `markets` lists `openable` (BTC, ETH today).
-- **No stop-loss or take-profit.** Liquidation takes the whole margin at the bust price.
+- **No stop-loss or take-profit on Papertrade;** a duty can close at a level
+  (`references/duty.md`).
 - **Fees:** a small haircut plus 2% of a winning close's gain; a loss costs nothing extra.
 - **Withdrawals:** at least 10 USDC, plus 1 USDC the first time unless the owner has a
   Hyperliquid account; `maxWithdrawUsd` includes it.
 - **Deposits** come from the owner's USDC through `acp trade` only.
-- **Chat only.** A duty cannot use this session key.
 - **Papertrade's API is unpublished:** an answer unlike `references/api.md` means it
   changed; stop and say so.
 

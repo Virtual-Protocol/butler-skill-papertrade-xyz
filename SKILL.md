@@ -148,8 +148,10 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    registration (step 2) at once; the close waits for the owner.
 
 8. [FIXED] Withdraw only when asked, at most `maxWithdrawUsd` and at least 10. It lands
-   on the owner's Hyperliquid account. If `account` has a `withdrawNote`, nothing can go
-   out: say it word for word and file nothing; never offer a smaller amount.
+   in their Hyperliquid account. A first withdrawal can owe a one-time 1 USDC activation
+   fee (`withdrawActivationFeeUsd`) on top; `maxWithdrawUsd` already leaves it out. Say
+   so first. If `account` has a `withdrawNote`, say it word for word and file
+   nothing; never offer a smaller amount.
 
    ```sh
    python3 /tmp/papertrade.py withdraw-typed-data --owner <OWNER> --amount <USDC>
@@ -225,8 +227,6 @@ python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 - **Markets:** those `markets` lists `openable` (BTC, ETH today).
 - **No stop-loss or take-profit.** Liquidation takes the whole margin at the bust price.
 - **Fees:** a small haircut plus 2% of a winning close's gain; a loss costs nothing extra.
-- **Withdrawals:** at least 10 USDC, plus 1 USDC the first time unless the owner has a
-  Hyperliquid account; `maxWithdrawUsd` includes it.
 - **Deposits** come from the owner's USDC through `acp trade` only.
 - **Chat only.** A duty cannot use this session key.
 - **Papertrade's API is unpublished:** an answer unlike `references/api.md` means it

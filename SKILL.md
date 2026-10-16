@@ -1,7 +1,7 @@
 ---
 name: papertrade-xyz
 description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, and withdraw - with a session key Butler keeps.
-version: 0.2.0
+version: 0.4.0
 metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
 ---
 
@@ -11,18 +11,20 @@ Your owner wants to act on **Papertrade**, a perpetuals exchange on Hyperliquid'
 where every trade faces Papertrade's own pool at Hyperliquid's mid price:
 
 - **Look** - "what's my Papertrade balance", "my positions": step 1, then stop.
+- **History** - "how did my trades do", "my PnL": step 1, then `history`
+  (`references/account.md`). Relay its figures; never add them up yourself.
 - **Fund** - "put $50 into Papertrade": step 3.
 - **Open** - "long BTC 100x with $20": steps 4 to 6 (`quote` first, always).
 - **Close** - "close my BTC long": step 7. Never wait for anything to close.
 - **Withdraw** - "take my money out of Papertrade": step 8.
 
 Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit orders
-(Papertrade has none), or any market other than the ones `markets` lists.
+(Papertrade has none), or a market `markets` does not list.
 
 ## Before you start
 
-1. **Papertrade is a different venue from the owner's Hyperliquid perps.** Its balance and
-   positions are only in this skill's reads, never in `bevo-read assets`.
+1. **Papertrade is not the owner's Hyperliquid perps.** Its balance and positions are only
+   in this skill's reads.
 2. **The bad case first, in their words, before anything else:** *"At 100x, a 1% move
    against you and the whole $20 is gone - there is no partial loss."* The figure is
    the `badCase` that `quote` prints; never compute one.
@@ -53,9 +55,8 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    python3 /tmp/papertrade.py markets
    ```
 
-   `<OWNER>` is `user.agentWalletAddress` from `bevo-read me`, always. Relay
-   `availableUsd`, each position's `side`, `market`, `positionUsd`, `entryPrice` and
-   `pnlUsdBeforeFees` as given (`references/account.md`). Then look at
+   `<OWNER>` is `user.agentWalletAddress` from `bevo-read me`, always. Relay the read's
+   figures as given (`references/account.md`). Then look at
    `sessionKey.action` (step 2) on **every** read, whatever the owner asked.
 
 2. [FIXED] Keep the session key usable. When `sessionKey.todo` is set, do it in this same
@@ -88,17 +89,20 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    `201` is accepted; `key-status` reads `ready` about 30 seconds later. Still not after a
    minute: "Accepted but not landed" below.
 
-3. [FIXED] Fund only when `availableUsd` is below the margin they want. Deposit from their
-   Base USDC to their own Papertrade deposit address, `depositAddress` from `account`:
+3. [FIXED] Fund only when asked or when `availableUsd` is below the margin they want. Plan
+   it first: it counts what already waits at their deposit address and refuses an amount
+   that would sit there uncredited. Its refusal is said as written; nothing is filed:
 
    ```sh
-   acp trade --token-in usdc --amount-in <USDC> --token-out usdc --chain-out 1337 --recipient <depositAddress> --idempotency-key <KEY>:deposit
+   python3 /tmp/papertrade.py deposit-plan --owner <OWNER> --amount <USDC>
+   acp trade --token-in usdc --amount-in <amountUsd> --token-out usdc --chain-out 1337 --recipient <depositAddress> --idempotency-key <KEY>:deposit
    ```
 
-   Always `--chain-out 1337`; any other chain is never credited. At least 10 USDC must arrive after the bridge fee, plus a 1 USDC
-   activation fee on the first deposit: send at least 13 the first time, 11 after. The
-   reply is an approval card. Once it confirms (step 9, `--route trade`), re-read
-   `account` until `availableUsd` rises (about a minute).
+   No amount, or refused: say its `why` and ask for at least `sendAtLeastUsd`; never
+   offer a smaller one. Use the
+   plan's `amountUsd` and `depositAddress` exactly; never another chain than `1337`. The
+   reply is a card; once it confirms (step 9, `--route trade`), read `account` until
+   `availableUsd` rises (`pendingDepositUsd` is what still waits).
 
 4. [ADAPT] Quote it with the owner's own numbers. It signs nothing, and refuses anything
    under Papertrade's minimums or over `availableUsd`; give its reason as written:
@@ -139,9 +143,8 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    python3 /tmp/papertrade.py account --owner <OWNER>
    ```
 
-   A close needs no card while the key is usable. If `close` says the key is not
-   registered, file the registration (step 2) at once and tell the owner the close waits
-   for their approval.
+   No card while the key is usable. If `close` says it is not registered, file the
+   registration (step 2) at once; the close waits for the owner's approval.
 
 8. [FIXED] Withdraw only when asked, at most `maxWithdrawUsd` and at least 10. It lands
    on the owner's Hyperliquid account. If `account` has a `withdrawNote`, nothing can go
@@ -160,6 +163,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    ```
 
    The signature is good for one hour; past that, build it again and file a new card.
+   It is done when `cashflows` shows the withdrawal `settled`.
 
 9. [FIXED] Wait for a card's outcome; never file it again to find out:
 
@@ -167,6 +171,8 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    bevo-read request <KEY>:<OP> --route sign
    ```
 
+   A card exists only once this finds it: run it right after filing, and never tell the
+   owner a card is waiting before it does. `not_found` - nothing was filed; say so.
    `approvalStatus: confirmed` - `approvalOutcome.signature` is the `<SIGNATURE>`.
    `rejected` or `failed` - nothing was signed; give the reason as written. `pending` -
    still with the owner: say so and stop until they come back. The deposit's card is a
@@ -202,8 +208,8 @@ python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 | --- | --- |
 | `admission_rejected` + `noDeposit` | Fund first (step 3). |
 | `admission_rejected` + `funding` | Not enough available; re-read `account` and say so. |
-| `admission_rejected` + `belowMinimum`, `belowMinimumNotional`, `leverageTooHigh`, `positionTooLarge`, `openInterest` | Give the reason; ask for a smaller or larger trade. Never change it yourself. |
-| `admission_rejected` + `tradingPaused`, `marketPaused`, `inactiveInstrument` | Papertrade is not taking that trade now. Closing is still possible. |
+| `admission_rejected` + `belowMinimum`, `belowMinimumNotional`, `leverageTooHigh`, `positionTooLarge`, `openInterest` | Give the reason and ask; never resize it yourself. |
+| `admission_rejected` + `tradingPaused`, `marketPaused`, `inactiveInstrument` | Not taking that trade now; closing still works. |
 | `admission_rejected` + `noOpenPositions` | Already closed or closing. Re-read `account`. |
 | `admission_rejected` + `sessionKeyLimit` | Too many keys registered; never make another. Say so and stop. |
 | `unauthorized_intent` | The key is not usable: read `account`, then step 2. |
@@ -216,21 +222,20 @@ python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 
 ## Limits
 
-- **Markets:** whatever `markets` lists as `openable`; BTC and ETH today.
+- **Markets:** those `markets` lists `openable` (BTC, ETH today).
 - **No stop-loss or take-profit.** Liquidation takes the whole margin at the bust price.
-- **Fees come out of a winning close:** a small haircut plus 2% of the gain. A loss
-  costs nothing extra.
-- **Withdrawals:** at least 10 USDC. The first one also pays 1 USDC unless the owner
-  already has a Hyperliquid account; `maxWithdrawUsd` already accounts for it.
+- **Fees:** a small haircut plus 2% of a winning close's gain; a loss costs nothing extra.
+- **Withdrawals:** at least 10 USDC, plus 1 USDC the first time unless the owner has a
+  Hyperliquid account; `maxWithdrawUsd` includes it.
 - **Deposits** come from the owner's USDC through `acp trade` only.
 - **Chat only.** A duty cannot use this session key.
-- **Papertrade's API is not published.** If an answer stops matching
-  `references/api.md`, stop and say Papertrade changed.
+- **Papertrade's API is unpublished:** an answer unlike `references/api.md` means it
+  changed; stop and say so.
 
 ## Say to the owner
 
 - Leverage in dollars: "a $2,000 position with $20 of your money", never just "100x".
 - The bad case before the upside, every time.
 - "Queued" until `account` shows the position; never "filled" from a `201`.
-- Approval cards: "approve it in the app", and what it lets Butler do.
+- Approval cards: what it lets Butler do, then "approve it in the app".
 - After a close: what came back to `availableUsd`, from the read.

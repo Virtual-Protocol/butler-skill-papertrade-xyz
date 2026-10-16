@@ -10,6 +10,7 @@ positions, funding and the session key. Relay its figures; never work one out.
 | `availableUsd` | USDC free to open with or withdraw. Margin in open positions is not in it |
 | `positions[]` | each open position, below |
 | `depositAddress` | the owner's own Papertrade deposit address, for `--recipient` in the deposit step. Only USDC arriving on Hyperliquid's ledger (`--chain-out 1337`) is credited |
+| `pendingDepositUsd` | USDC sitting at the deposit address, not yet credited. It is credited once the total there reaches 10; until then it counts toward the next deposit (`deposit-plan`) |
 | `hyperCoreAccount` | whether the owner already has a Hyperliquid account; without one the first withdrawal pays 1 USDC |
 | `withdrawActivationFeeUsd` | `0` or `1` |
 | `maxWithdrawUsd` | the most a withdrawal can ask for now. Under 10 means nothing can be withdrawn yet |
@@ -31,6 +32,31 @@ positions, funding and the session key. Relay its figures; never work one out.
 
 `markPrice` and `pnlUsdBeforeFees` are `null` when Hyperliquid's price could not be
 read: say the value is unknown, never zero.
+
+## Closed positions and PnL
+
+`python3 /tmp/papertrade.py history --owner <OWNER> [--limit 20]` lists closed positions,
+newest first (at most 200), from Papertrade's own history. Each figure is computed the way
+Papertrade's app computes it; relay them, never recompute or add them up.
+
+| Field | Means |
+| --- | --- |
+| `outcome` | `closed` (the owner or Butler closed it) or `liquidated` |
+| `pnlUsd` | the result: Papertrade's adjusted PnL less the fee paid; a liquidation is minus the whole margin |
+| `pnlPct` | `pnlUsd` as a share of the margin |
+| `feeUsd` | the fee taken from a winning close (2% of the gain) |
+| `entryPrice`, `exitPrice`, `marginUsd`, `leverage`, `positionUsd` | as on the open position |
+| `openedAt`, `closedAt`, `heldFor` | when, in UTC, and for how long |
+| `paperMinted` | PAPER minted to the owner from a loss |
+
+`summary` totals the trades returned: `count`, `wins`, `losses`, `liquidated`,
+`totalPnlUsd`, `totalFeesUsd`. When `more` is true, `summary.covers` says it is only the
+newest ones. Say so, and raise `--limit` if the owner asked about everything.
+
+`python3 /tmp/papertrade.py cashflows --owner <OWNER>` lists deposits and withdrawals.
+A deposit's `status` is `credited`. A withdrawal moves through `signed`, `submitted` and
+`in_transit` to `settled`, its end, or `failed`. `needs_signature` means it needs a new
+card.
 
 ## An unreadable account
 

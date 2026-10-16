@@ -10,6 +10,7 @@ request it prepares lands in its own `bodyFile` and goes out with the `curl` in 
 python3 /tmp/papertrade.py config
 python3 /tmp/papertrade.py markets
 python3 /tmp/papertrade.py account --owner <OWNER>
+python3 /tmp/papertrade.py deposit-plan --owner <OWNER> --amount 20
 python3 /tmp/papertrade.py key-status --owner <OWNER>
 python3 /tmp/papertrade.py key-new --owner <OWNER>
 python3 /tmp/papertrade.py register-typed-data --owner <OWNER>
@@ -18,6 +19,8 @@ python3 /tmp/papertrade.py quote --owner <OWNER> --market BTC --side long --marg
 python3 /tmp/papertrade.py open --owner <OWNER> --market BTC --side long --margin 20 --leverage 100
 python3 /tmp/papertrade.py close --owner <OWNER> --ids 756953
 python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
+python3 /tmp/papertrade.py history --owner <OWNER> --limit 20
+python3 /tmp/papertrade.py cashflows --owner <OWNER>
 python3 /tmp/papertrade.py withdraw-typed-data --owner <OWNER> --amount 12.5
 python3 /tmp/papertrade.py withdraw-body --owner <OWNER> --signature <SIGNATURE>
 ```
@@ -50,12 +53,15 @@ match. A failure there means Papertrade changed its contracts; stop.
 | --- | --- |
 | `markets` | the markets Papertrade lists, which are `openable`, `maxLeverage`, `maxPositionUsd`, and the minimums `minMarginUsd` / `minPositionUsd` |
 | `account` | the balance, open positions, deposit address, withdrawal limits and the session key's state (`references/account.md`) |
+| `deposit-plan` | the least to send so a deposit is credited (`sendAtLeastUsd`), counting USDC already waiting at the deposit address and the one-time 1 USDC fee to open it, with `why` to say to the owner. With `--amount`, refuses an amount that would sit uncredited, or confirms it with `amountUsd` and `depositAddress` for the `acp trade` |
 | `key-status` | `action`: `ready`, `renew` (under a day left), `register` or `key-new`; `expiresIn`; and, whenever it is not `ready`, `todo`: the instruction to carry out in the same turn |
 | `key-new` | makes a session key and prints only its address; refuses whenever one exists |
 | `register-typed-data` / `register-body` | the owner's one signature that lets the key trade for 30 days |
 | `quote` | every check an open makes, signing nothing: `positionUsd`, `wipedOutAtMovePct`, `wipedOutNearPrice` (about; the real bust price sits a little before it), `markPrice`, and `badCase`, the sentence to say to the owner |
 | `open` | the same checks, then signs with the session key and writes the `bodyFile` |
 | `close` | signs a close for 1 to 12 position ids |
+| `history` | closed positions, newest first, with `pnlUsd` and `pnlPct` as Papertrade's app computes them (adjusted PnL less the fee; a liquidation is minus the margin), and a `summary` (`references/account.md`) |
+| `cashflows` | deposits and withdrawals with their `status`; a withdrawal is done at `settled` |
 | `intents` | Papertrade's queue for the owner; with `--intent`, `stillQueued` for one request. Neither queued nor in `account` means it did not go through |
 | `withdraw-typed-data` / `withdraw-body` | the owner's signature for a withdrawal to their Hyperliquid account |
 
@@ -80,11 +86,13 @@ import argparse
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import secrets
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 API = "https://exchange.papertrade.xyz"
@@ -106,6 +114,14 @@ RENEW_BEFORE = 24 * 3600
 DEADLINE = 3600
 WAD = 10 ** 18
 USDC = 10 ** 6
+# Papertrade sweeps a deposit address into the account once it holds this much in all.
+SWEEP_MIN = 10
+# Hyperliquid's fee to open a new HyperCore account, paid by a deposit address's first arrival.
+ACTIVATION_FEE = 1
+# Relay's Base→Hyperliquid fee is not quoted to us; this is the margin kept above it.
+BRIDGE_BUFFER = 1
+# The trading bot's own floor for a deposit into Hyperliquid.
+BOT_MIN_DEPOSIT = 5
 ZERO_ADDRESS = "0x" + "0" * 40
 
 TYPES = {
@@ -613,6 +629,54 @@ def _mids():
     return json.loads(text) if status == 200 else {}
 
 
+def _hl_info(kind, user):
+    status, text = _http(HL_INFO, {"type": kind, "user": user})
+    if status != 200:
+        raise Refused(f"Hyperliquid did not answer ({status}); cannot read the deposit address")
+    return json.loads(text)
+
+
+def deposit_state(owner):
+    """The owner's deposit address, the USDC already waiting there uncredited (it counts
+    toward the next sweep), and whether its HyperCore account still needs opening."""
+    status, text = _http(API + "/funding/deposits/check", {"user": owner})
+    proxy = json.loads(text).get("proxy") if status == 200 else None
+    if not proxy or not re.fullmatch(r"0x[0-9a-fA-F]{40}", proxy):
+        raise Refused(f"Papertrade did not give a deposit address ({status}); nothing to deposit to")
+    spot = sum(float(b.get("total") or 0) for b in _hl_info("spotClearinghouseState", proxy).get("balances", [])
+               if b.get("coin") == "USDC")
+    perp = float(_hl_info("clearinghouseState", proxy).get("withdrawable") or 0)
+    opened = _hl_info("userRole", proxy).get("role") not in (None, "missing")
+    return {"depositAddress": proxy.lower(), "pendingUsd": round(spot + perp, 6),
+            "activationFeeUsd": 0 if opened else ACTIVATION_FEE}
+
+
+def deposit_plan(owner, amount=None):
+    """The least to send so a deposit is credited, and, given an amount, the acp trade for it
+    or why it would sit uncredited. Credit needs SWEEP_MIN at the deposit address in all."""
+    d = deposit_state(owner)
+    pending, fee = d["pendingUsd"], d["activationFeeUsd"]
+    missing = max(0.0, SWEEP_MIN - pending)
+    least = max(BOT_MIN_DEPOSIT, math.ceil(missing + fee + BRIDGE_BUFFER - 1e-9))
+    plan = {"depositAddress": d["depositAddress"], "pendingDepositUsd": pending, "activationFeeUsd": fee,
+            "bridgeBufferUsd": BRIDGE_BUFFER, "sendAtLeastUsd": least}
+    if pending >= SWEEP_MIN:
+        plan["why"] = (f"{pending:g} USDC is already at your deposit address and is being credited; no "
+                       f"deposit is needed for that. Anything more needs at least {least:g} USDC.")
+    else:
+        waiting = f"; {pending:g} USDC is already waiting there" if pending else ""
+        first = f", plus the one-time {fee:g} USDC fee to open it" if fee else ""
+        plan["why"] = (f"Papertrade credits a deposit once at least {SWEEP_MIN:g} USDC has arrived at your "
+                       f"deposit address{first}{waiting}. The bridge from Base takes a small fee, so send at "
+                       f"least {least:g} USDC.")
+    if amount is None:
+        return plan
+    if amount + 1e-9 < least:
+        raise Refused(f"{amount:g} USDC would sit at your deposit address uncredited. {plan['why']}")
+    plan["amountUsd"] = amount
+    return plan
+
+
 def account(owner):
     cfg = config()
     ex = cfg["exchange"]
@@ -638,15 +702,15 @@ def account(owner):
             "wipedOutAtMovePct": round(100 / lev, 3),
             "openedAt": opened,
         })
-    status, text = _http(API + "/funding/deposits/check", {"user": owner})
-    proxy = json.loads(text).get("proxy") if status == 200 else None
+    deposit = deposit_state(owner)
     funding = api_get(f"/query/accounts/{owner}/funding")
     withdrew = any(str(i.get("kind", i.get("type", ""))).lower().startswith("withdraw") for i in funding.get("items", []))
     fee = 0 if funding.get("coreAccount") or withdrew else 1
-    available = balance / WAD - sum(p["marginUsd"] for p in positions) * 0  # balances() already excludes locked margin
+    available = balance / WAD  # balances() already leaves out margin locked in positions
     return {
         "owner": owner, "availableUsd": round(available, 6), "positions": positions,
-        "depositAddress": proxy, "hyperCoreAccount": bool(funding.get("coreAccount")),
+        "depositAddress": deposit["depositAddress"], "pendingDepositUsd": deposit["pendingUsd"],
+        "hyperCoreAccount": bool(funding.get("coreAccount")),
         "withdrawActivationFeeUsd": fee, "minWithdrawUsd": 10,
         "maxWithdrawUsd": max(0.0, round(available - fee, 6)),
         "withdrawNote": _withdraw_note(available, fee),
@@ -666,6 +730,88 @@ def _withdraw_note(available, fee):
     return (f"Nothing can be withdrawn yet: Papertrade's minimum is 10 USDC{fee_part}, and "
             f"${available:.2f} is available. It needs ${need:g} more, which means a deposit of "
             f"at least 10 USDC, the least Papertrade credits.")
+
+
+HISTORY_MAX = 200
+
+
+def _pages(owner, kind, limit):
+    """Papertrade's own history routes, newest first, 75 a page."""
+    items, cursor = [], None
+    while len(items) < limit:
+        query = {"limit": "75", **({"cursor": cursor} if cursor else {})}
+        reply = api_get(f"/query/accounts/{owner}/{kind}?{urllib.parse.urlencode(query)}")
+        items += reply.get("items", [])
+        nxt = reply.get("nextCursor")
+        if nxt and nxt == cursor:
+            # A cursor that repeats would loop for ever; what was read is real but not all of it.
+            return items[:limit], True
+        if not nxt:
+            cursor = None
+            break
+        cursor = nxt
+    return items[:limit], bool(cursor) or len(items) > limit
+
+
+def _utc(ms):
+    return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(ms) // 1000))
+
+
+def _held(seconds):
+    seconds = max(0, int(seconds))
+    if seconds < 120:
+        return f"{seconds} seconds"
+    if seconds < 7200:
+        return f"{seconds // 60} minutes"
+    if seconds < 172800:
+        return f"{seconds // 3600} hours"
+    return f"{seconds // 86400} days"
+
+
+def history(owner, limit=20):
+    """Closed positions with their result, as Papertrade's own table computes it: the
+    adjusted PnL less the fee paid, and the whole margin for a liquidation."""
+    rows, more = _pages(owner, "trades", max(1, min(limit, HISTORY_MAX)))
+    trades, total, fees, wins, losses, liquidated = [], 0, 0, 0, 0, 0
+    for e in rows:
+        margin, fee = int(e["marginRaw"]), int(e.get("userPaidFeeRaw") or 0)
+        is_liq = e.get("kind") == "Liquidated"
+        net = -margin if is_liq else int(e.get("adjustedPnlRaw") or 0) - fee
+        scale = int(e.get("priceScaleRaw") or 1)
+        total, fees = total + net, fees + (0 if is_liq else fee)
+        wins, losses, liquidated = wins + (net > 0), losses + (net < 0), liquidated + is_liq
+        trades.append({
+            "positionId": str(e["positionId"]), "market": e.get("symbol"),
+            "side": "long" if e.get("isLong") else "short",
+            "outcome": "liquidated" if is_liq else "closed",
+            "marginUsd": margin / WAD, "leverage": e.get("leverage"),
+            "positionUsd": round(margin * int(e.get("leverage") or 0) / WAD, 2),
+            "entryPrice": int(e["entryPriceRaw"]) / scale, "exitPrice": int(e["exitPriceRaw"]) / scale,
+            "pnlUsd": round(net / WAD, 6), "pnlPct": round(net * 100 / margin, 2) if margin else None,
+            "feeUsd": round(fee / WAD, 6), "paperMinted": round(int(e.get("paperMintedRaw") or 0) / WAD, 6),
+            "openedAt": _utc(e["openedAtMs"]), "closedAt": _utc(e["timestampMs"]),
+            "heldFor": _held((int(e["timestampMs"]) - int(e["openedAtMs"])) / 1000),
+            "txHash": e.get("txHash"),
+        })
+    return {"trades": trades, "more": more, "summary": {
+        "count": len(trades), "wins": wins, "losses": losses, "liquidated": liquidated,
+        "totalPnlUsd": round(total / WAD, 6), "totalFeesUsd": round(fees / WAD, 6),
+        "covers": "these trades only; more exist" if more else "every closed trade"}}
+
+
+def cashflows(owner, limit=20):
+    """Deposits and withdrawals, newest first; a withdrawal is done at `settled`."""
+    rows, more = _pages(owner, "cashflows", max(1, min(limit, HISTORY_MAX)))
+    out = []
+    for e in rows:
+        recipient = e.get("recipientAmountRaw")
+        out.append({
+            "kind": str(e.get("kind", "")).lower(), "amountUsd": round(int(e["amountRaw"]) / WAD, 6),
+            "receivedUsd": round(int(recipient) / WAD, 6) if recipient else None,
+            "route": e.get("route"), "status": e.get("withdrawalStatus") or ("credited" if e.get("kind") == "Deposit" else None),
+            "at": _utc(e["timestampMs"]), "txHash": e.get("txHash"),
+        })
+    return {"cashflows": out, "more": more}
 
 
 def intents(owner, intent_id=None):
@@ -731,6 +877,13 @@ def main(argv):
     w = sub.add_parser("withdraw-typed-data")
     w.add_argument("--owner", required=True)
     w.add_argument("--amount", required=True, type=float, help="USDC to receive, at least 10")
+    dp = sub.add_parser("deposit-plan")
+    dp.add_argument("--owner", required=True)
+    dp.add_argument("--amount", type=float, help="USDC the owner wants to send from Base")
+    for name in ("history", "cashflows"):
+        hp = sub.add_parser(name)
+        hp.add_argument("--owner", required=True)
+        hp.add_argument("--limit", type=int, default=20, help=f"newest first, at most {HISTORY_MAX}")
     it = sub.add_parser("intents")
     it.add_argument("--owner", required=True)
     it.add_argument("--intent", help="the intentId a build printed")
@@ -777,6 +930,12 @@ def main(argv):
                            withdraw_reading(acct["withdrawActivationFeeUsd"]))
     if a.cmd == "withdraw-body":
         return owner_body(owner, "WithdrawToCore", a.signature, "withdrawToCore", {"withdrawal": {"route": "hypercore"}})
+    if a.cmd == "deposit-plan":
+        return deposit_plan(owner, a.amount)
+    if a.cmd == "history":
+        return history(owner, a.limit)
+    if a.cmd == "cashflows":
+        return cashflows(owner, a.limit)
     if a.cmd == "intents":
         return intents(owner, a.intent)
     if a.cmd in ("quote", "open"):

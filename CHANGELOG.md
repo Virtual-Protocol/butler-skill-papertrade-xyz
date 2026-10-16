@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.4.0
+
+- **`history`: closed positions and their PnL.** It reads Papertrade's own
+  `/query/accounts/<owner>/trades` and computes each result the way Papertrade's app does:
+  the adjusted PnL less the fee paid, with a liquidation counted as minus the whole margin.
+  It returns a `summary` of wins, losses, liquidations and totals. Measured on production
+  against the test wallet's one closed trade, and against synthetic win, loss and
+  liquidation rows.
+- **Pagination follows `nextCursor`** 75 at a time, up to `--limit` (200 at most). A
+  cursor Papertrade repeats ends the read and marks it incomplete (`more: true`), never
+  "every closed trade". Tested against a simulated 180-trade, 3-page history.
+- **`cashflows`: deposits and withdrawals with their status.** A withdrawal is reported
+  done only at `settled`, never at the 201 that queued it.
+- The skill gains a History intent and a settled check on withdrawals. Wording was trimmed
+  elsewhere to stay under the 12,000-character body.
+
+## 0.3.0
+
+- **`deposit-plan` decides how much to deposit.** It reads what already waits at the
+  owner's deposit address and whether its HyperCore account is open, then answers the
+  least to send (`sendAtLeastUsd`) and a `why` to say.
+  - Formula: the missing part of 10 USDC, plus the 1 USDC fee to open the account, plus a
+    1 USDC margin for Relay's bridge fee, never under the trading bot's 5 USDC floor.
+  - Given an amount, it refuses one that would sit at the address uncredited.
+  - Before this the skill said "send at least 13 the first time, 11 after", which the
+    agent applied by hand and could not check.
+  - Measured: Papertrade's app refuses any deposit arriving under 10 USDC, while the
+    protocol simply leaves a smaller one waiting until the total reaches 10.
+- `account` reports `pendingDepositUsd`, so money waiting at the deposit address is shown
+  as waiting, never as missing.
+- **A card exists only once `bevo-read request` finds it.** Haiku twice told an owner a
+  card was waiting when the command that would have filed it never ran (a renewal; a
+  deposit blocked by its environment). The agent now reads the card back before saying
+  so, and `not_found` is reported as nothing filed.
+- A refused deposit amount is answered with `sendAtLeastUsd`, never a smaller offer.
+
 ## 0.2.0
 
 - **Renewal a day ahead, on every read.** `sessionKey.action` is `renew` with under a day

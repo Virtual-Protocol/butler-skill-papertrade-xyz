@@ -12,8 +12,8 @@ positions, funding and the session key. Relay its figures; never work one out.
 | `depositAddress` | the owner's own Papertrade deposit address, for `--recipient` in the deposit step. Only USDC arriving on Hyperliquid's ledger (`--chain-out 1337`) is credited |
 | `pendingDepositUsd` | USDC sitting at the deposit address, not yet credited. It is credited once the total there reaches 10; until then it counts toward the next deposit (`deposit-plan`) |
 | `hyperCoreAccount` | whether the owner already has a Hyperliquid account; without one the first withdrawal pays 1 USDC |
-| `withdrawActivationFeeUsd` | `0` or `1` |
-| `maxWithdrawUsd` | the most a withdrawal can ask for now. Under 10 means nothing can be withdrawn yet |
+| `withdrawActivationFeeUsd` | `0` or `1`: the one-time fee Papertrade takes on top of a first withdrawal when the owner has no Hyperliquid account yet |
+| `maxWithdrawUsd` | the most a withdrawal can ask for now: `availableUsd` less the activation fee when one is owed. Under 10 means nothing can be withdrawn yet |
 | `withdrawNote` | set only when nothing can be withdrawn: the sentence to say, word for word. `null` otherwise |
 | `sessionKey.action` | `ready`, `renew`, `register` or `key-new` (`references/session-key.md`); `sessionKey.expiresIn` says how long is left |
 

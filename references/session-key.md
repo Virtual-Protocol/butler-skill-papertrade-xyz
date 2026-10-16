@@ -20,6 +20,7 @@ the owner's Papertrade balance.
 | `renew` | registered, under a day left; still works | register the **same** key again now. Ask the owner to approve it even mid-conversation about something else |
 | `register` | not registered on-chain, or expired | register it; nothing can open **or close** until the owner approves |
 | `key-new` | no key on this butler | `key-new` once, then register |
+| `fund-first` | the account has never had a deposit; Papertrade takes no key before one (`noDeposit`) | no card: fund it, then register once `account` shows the deposit |
 
 Registering the same key again resets its 30 days; measured on Papertrade, with the
 expiry moving forward and the key never interrupted. **There is never a reason to make a

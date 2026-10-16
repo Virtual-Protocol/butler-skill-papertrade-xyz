@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.1
+
+- **Fund before the key.** Papertrade refuses a session-key registration with `noDeposit`
+  until the account has had a deposit, so a card filed earlier can only be refused and
+  the owner approves it for nothing. `key-status` now answers `fund-first` for an account
+  with no cashflow yet, files no card, and asks for the key once the deposit is credited.
+  An unreadable cashflow history counts as funded, so the registration then meets
+  Papertrade's own refusal rather than being skipped.
+- **A full withdrawal is never refused for dust.** Papertrade's balance carries 18
+  decimals and a withdrawal asks in USDC's 6; `availableUsd` and `maxWithdrawUsd` were
+  rounded to the nearest, so a balance just under a cent boundary read a hair high and a
+  withdrawal of all of it answered `funding`. Both now round down, and `withdraw-typed-data`
+  checks the amount in whole USDC units.
+- **The activation fee is said, and counted the way Papertrade counts it.** Step 8 tells
+  the owner about the one-time 1 USDC fee before the card, and `maxWithdrawUsd` leaves it
+  out. A past withdrawal is now read from `/funding`'s items, which are all withdrawals; the
+  old check looked for a `kind` field those items do not have.
+
 ## 1.0.0
 
 First release: trade BTC and ETH perpetuals on Papertrade (papertrade.xyz).

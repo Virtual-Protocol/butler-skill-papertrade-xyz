@@ -54,7 +54,7 @@ match. A failure there means Papertrade changed its contracts; stop.
 | `markets` | the markets Papertrade lists, which are `openable`, `maxLeverage`, `maxPositionUsd`, and the minimums `minMarginUsd` / `minPositionUsd` |
 | `account` | the balance, open positions, deposit address, withdrawal limits and the session key's state (`references/account.md`) |
 | `deposit-plan` | the least to send so a deposit is credited (`sendAtLeastUsd`), counting USDC already waiting at the deposit address and the one-time 1 USDC fee to open it, with `why` to say to the owner. With `--amount`, refuses an amount that would sit uncredited, or confirms it with `amountUsd` and `depositAddress` for the `acp trade` |
-| `key-status` | `action`: `ready`, `renew` (under a day left), `register` or `key-new`; `expiresIn`; and, whenever it is not `ready`, `todo`: the instruction to carry out in the same turn |
+| `key-status` | `action`: `ready`, `renew` (under a day left), `register`, `key-new`, or `fund-first` (the account never had a deposit, and Papertrade takes no key before one); `expiresIn`; and, whenever it is not `ready`, `todo`: the instruction to carry out in the same turn |
 | `key-new` | makes a session key and prints only its address; refuses whenever one exists |
 | `register-typed-data` / `register-body` | the owner's one signature that lets the key trade for 30 days |
 | `quote` | every check an open makes, signing nothing: `positionUsd`, `wipedOutAtMovePct`, `wipedOutNearPrice` (about; the real bust price sits a little before it), `markPrice`, and `badCase`, the sentence to say to the owner |
@@ -486,19 +486,35 @@ def _left(seconds):
     return f"{max(seconds, 0) // 60} minutes"
 
 
-def key_status(owner):
+def _ever_funded(owner):
+    """Papertrade refuses a session key for an account that never had a deposit (`noDeposit`),
+    and any cashflow means a deposit came first. An unreadable answer counts as funded: the
+    registration then meets Papertrade's own refusal rather than none at all."""
+    try:
+        return bool(api_get(f"/query/accounts/{owner}/cashflows?limit=75").get("items"))
+    except Refused:
+        return True
+
+
+def key_status(owner, funded=None):
     """`action` is the one thing to do next: key-new, register (none on-chain, or expired),
-    renew (under a day left: register the same key again) or ready."""
+    renew (under a day left: register the same key again), fund-first (no deposit yet, and
+    Papertrade takes no key before one, so a card now could only be refused) or ready."""
     cfg = config()
     k = _load_key(owner)
     file_card = ("File the registration card now, in this turn: run register-typed-data, then "
                  "acp wallet sign-typed-data with the two files it prints (SKILL.md step 2). "
                  "Never tell the owner a card is coming before it is filed.")
+    expiry = _onchain_expiry(cfg, owner, k["address"]) if k else 0
+    left = expiry - int(time.time())
+    if left <= 0 and not (funded if funded is not None else _ever_funded(owner)):
+        return {"key": k["address"] if k else None, "registered": False, "action": "fund-first",
+                "todo": ("Papertrade takes no session key before the account's first deposit, so file "
+                         "no card yet. A deposit comes first (SKILL.md step 3); once account shows it "
+                         "credited, this asks for the key.")}
     if not k:
         return {"key": None, "registered": False, "action": "key-new",
                 "todo": "Run key-new once, then: " + file_card}
-    expiry = _onchain_expiry(cfg, owner, k["address"])
-    left = expiry - int(time.time())
     if left <= 0:
         return {"key": k["address"], "registered": False, "expiresAt": expiry or None, "action": "register",
                 "todo": "Opens and closes are blocked until the owner approves. " + file_card}
@@ -714,7 +730,7 @@ def account(owner):
         "withdrawActivationFeeUsd": fee, "minWithdrawUsd": 10,
         "maxWithdrawUsd": max(0.0, round(available - fee, 6)),
         "withdrawNote": _withdraw_note(available, fee),
-        "sessionKey": key_status(owner),
+        "sessionKey": key_status(owner, funded=True if available > 0 or positions else None),
     }
 
 

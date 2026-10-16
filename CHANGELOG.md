@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1
+
+- **Fund before the key.** Papertrade refuses a session-key registration with `noDeposit`
+  until the account has had a deposit, so a card filed earlier can only be refused and
+  the owner approves it for nothing. `key-status` now answers `fund-first` for an account
+  with no cashflow yet, files no card, and asks for the key once the deposit is credited.
+  An unreadable cashflow history counts as funded, so the registration then meets
+  Papertrade's own refusal rather than being skipped.
+
 ## 1.0.0
 
 First release: trade BTC and ETH perpetuals on Papertrade (papertrade.xyz).

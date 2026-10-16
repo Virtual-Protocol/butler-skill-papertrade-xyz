@@ -1,7 +1,7 @@
 ---
 name: papertrade-xyz
 description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, and withdraw - with a session key Butler keeps.
-version: 1.0.0
+version: 1.0.1
 metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
 ---
 
@@ -67,6 +67,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
      about something else, so a close never waits for one.
    - `register` - not usable: none on-chain, or expired. Opens **and closes** wait for it.
    - `key-new` - no key yet: run `key-new` once, then register it.
+   - `fund-first` - never funded: no card yet; fund it (step 3).
 
    Register (also for `renew`; it is the same key again):
 
@@ -144,7 +145,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    ```
 
    No card while the key is usable. If `close` says it is not registered, file the
-   registration (step 2) at once; the close waits for the owner's approval.
+   registration (step 2) at once; the close waits for the owner.
 
 8. [FIXED] Withdraw only when asked, at most `maxWithdrawUsd` and at least 10. It lands
    on the owner's Hyperliquid account. If `account` has a `withdrawNote`, nothing can go
@@ -175,8 +176,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), stop-loss or take-profit 
    owner a card is waiting before it does. `not_found` - nothing was filed; say so.
    `approvalStatus: confirmed` - `approvalOutcome.signature` is the `<SIGNATURE>`.
    `rejected` or `failed` - nothing was signed; give the reason as written. `pending` -
-   still with the owner: say so and stop until they come back. The deposit's card is a
-   trade: `--route trade`.
+   still with the owner: say so and stop until they come back.
 
 ## Idempotency and retries
 

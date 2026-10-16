@@ -47,13 +47,3 @@ First release: trade BTC and ETH perpetuals on Papertrade (papertrade.xyz).
   reported as still queued or as did-not-go-through, and is never re-sent.
 - **Papertrade's contract address is read from its app** and refused unless the chain
   agrees, both the session-key manager and the EIP-712 domain.
-
-**Tested**
-
-- Against Papertrade production with a throwaway wallet:
-  - a deposit;
-  - registering a key, and re-registering it;
-  - a $10 × 100 BTC open and close;
-  - the history and cashflow reads.
-- Agent runs on Sonnet and Haiku with sandboxed platform commands.
-- Not yet run live: a withdrawal.

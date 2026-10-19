@@ -9,11 +9,11 @@ legs. A duty runs the cycles, so the owner fills in one ticket and approves it o
 open N longs + N shorts → price moves ±MOVE_PCT → close all → note the cycle → again
 ```
 
-**The cost is the haircut on the winning legs, not a small fee.** A winning leg is paid
-back about 10% less than it made, and much less on small moves; Papertrade takes nothing
-from a loss. On BTC a 1% cycle keeps about 88% of the win, a 0.3% cycle about 84%. So a
-cycle costs about $1.20 per $1,000 leg at 1%, and $0.48 at 0.3%. `farm-quote` works it
-out; never do the arithmetic yourself.
+**The cost is what the winning legs give back.** A winning leg is paid back about 10%
+less than it made (much less on small moves), then Papertrade keeps its win fee (2%
+today) of the rest; a loss costs nothing extra. On BTC a 1% cycle keeps about 86% of the
+win, a 0.3% cycle about 82%. So a cycle costs about $1.36 per $1,000 leg at 1%, and $0.53
+at 0.3%. `farm-quote` works it out; never do the arithmetic yourself.
 
 ## The ticket
 

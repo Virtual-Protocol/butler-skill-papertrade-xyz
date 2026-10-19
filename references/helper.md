@@ -54,7 +54,7 @@ match. A failure there means Papertrade changed its contracts; stop.
 
 | Command | Does |
 | --- | --- |
-| `markets` | the markets Papertrade lists, which are `openable`, `maxLeverage`, `maxPositionUsd`, and the minimums `minMarginUsd` / `minPositionUsd` |
+| `markets` | the markets Papertrade lists, which are `openable`, `maxLeverage`, `maxPositionUsd`, the minimums `minMarginUsd` / `minPositionUsd`, and `winFeeRate`, the share of a winning close's gain Papertrade keeps |
 | `account` | the balance, open positions, deposit address, withdrawal limits and the session key's state (`references/account.md`) |
 | `deposit-plan` | the least to send so a deposit is credited (`sendAtLeastUsd`), counting USDC already waiting at the deposit address and the one-time 1 USDC fee to open it, with `why` to say to the owner. With `--amount`, refuses an amount that would sit uncredited, or confirms it with `amountUsd` and `depositAddress` for the `acp trade` |
 | `key-status` | `action`: `ready`, `renew` (under a day left), `register`, `key-new`, or `fund-first` (the account never had a deposit, and Papertrade takes no key before one); `expiresIn`; and, whenever it is not `ready`, `todo`: the instruction to carry out in the same turn. In a duty, `todo` is to notify the owner, never a card |
@@ -67,7 +67,7 @@ match. A failure there means Papertrade changed its contracts; stop.
 | `history` | closed positions, newest first, with `pnlUsd` and `pnlPct` as Papertrade's app computes them (adjusted PnL less the fee; a liquidation is minus the margin), and a `summary` (`references/account.md`) |
 | `cashflows` | deposits and withdrawals with their `status`; a withdrawal is done at `settled` |
 | `intents` | Papertrade's queue for the owner; with `--intent`, `stillQueued` for one request. Neither queued nor in `account` means it did not go through |
-| `farm-quote` | the farm ticket, signing nothing: one cycle's `costPerCycleUsd` and `paperPerCycle` (PAPER per $1 lost is read from the owner's own losing closes; `null` until there is one), `costPer1kPaperUsd`, `cyclesBeforeStop`, `wipedOutAtMovePct`, `safeLeverage`, exit prices, and `summary`, `badCase` and `warnings` to say (`references/farm.md`). Refuses settings that cannot work |
+| `farm-quote` | the farm ticket, signing nothing: one cycle's `costPerCycleUsd` (the winning legs' haircut and Papertrade's win fee) and `paperPerCycle` (PAPER per $1 lost is read from the owner's own losing closes; `null` until there is one), `costPer1kPaperUsd`, `cyclesBeforeStop`, `wipedOutAtMovePct`, `safeLeverage`, exit prices, and `summary`, `badCase` and `warnings` to say (`references/farm.md`). Refuses settings that cannot work |
 | `withdraw-typed-data` / `withdraw-body` | the owner's signature for a withdrawal to their Hyperliquid account |
 
 A duty may run every command except `key-new`, `duty-helper` and the owner steps, which each need the owner and are refused there.
@@ -693,7 +693,9 @@ def markets():
             "priceScale": int(m["priceScale"]),
         })
     return {"tradingPaused": state.get("tradingPaused"), "minMarginUsd": int(state["minimumTradeSizeRaw"]) / WAD,
-            "minPositionUsd": int(state["minimumOpenNotionalRaw"]) / WAD, "markets": out}
+            "minPositionUsd": int(state["minimumOpenNotionalRaw"]) / WAD,
+            "winFeeRate": int(state["winFeeRateRaw"]) / WAD if state.get("winFeeRateRaw") else None,
+            "markets": out}
 
 
 def _mids():
@@ -943,7 +945,8 @@ def quote(owner, market, side, margin, leverage):
 # less Papertrade's haircut: 10% base, a per-market knee that bites hardest on small moves,
 # and a 0.2 bp deadband. These are the figures Papergainz' farm page uses; its published
 # cycle ($8,000 x 50x, 100 pairs, 1% on BTC: $47,399.20 for 4,290,739 PAPER) comes out
-# to the cent with them.
+# to the cent with them. Papergainz leaves out Papertrade's win fee (2% today, read live
+# from `winFeeRateRaw`), which is taken from what the haircut leaves, so it is added here.
 FARM_BASE_HAIRCUT = 0.10
 FARM_KNEE = {"BTC": 1.894e-4, "ETH": 2.733e-4}
 FARM_DEADBAND = 2e-5
@@ -1006,8 +1009,10 @@ def farm_quote(owner, market, margin, leverage, move_pct, pairs, stop_below, hou
     if hours <= 0 or max_cycles < 0:
         raise Refused("the hour limit must be above 0, and max cycles 0 (no limit) or more")
 
+    if mk["winFeeRate"] is None:
+        raise Refused("cannot read Papertrade's win fee, so a cycle's cost is unknown")
     knee = FARM_KNEE[m["symbol"]]
-    kept = (move - FARM_DEADBAND) * (1 - FARM_BASE_HAIRCUT) / (1 + knee / move)
+    kept = (move - FARM_DEADBAND) * (1 - FARM_BASE_HAIRCUT) / (1 + knee / move) * (1 - mk["winFeeRate"])
     loss, gain = move * notional * pairs, kept * notional * pairs
     cost = loss - gain
     rate = _farm_paper_rate(owner)
@@ -1032,7 +1037,7 @@ def farm_quote(owner, market, margin, leverage, move_pct, pairs, stop_below, hou
         "movePct": move_pct, "stopBelowUsd": stop_below, "hourLimit": hours, "maxCycles": max_cycles,
         "notionalPerLegUsd": round(notional, 2), "cycleHoldsUsd": round(uses, 2),
         "losingLegsPayUsd": round(loss, 2), "winningLegsKeepUsd": round(gain, 2),
-        "winningKeepsPct": round(gain / loss * 100, 1),
+        "winningKeepsPct": round(gain / loss * 100, 1), "winFeePct": round(mk["winFeeRate"] * 100, 2),
         "costPerCycleUsd": round(cost, 2), "paperPerCycle": round(paper) if paper else None,
         "paperPerUsdLost": rate, "costPer1kPaperUsd": round(cost / paper * 1000, 2) if paper else None,
         "availableUsd": available, "cyclesBeforeStop": cycles,

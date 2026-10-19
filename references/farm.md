@@ -94,8 +94,9 @@ their yes to every leg the farm opens: a duty asks no one before it opens.
    ```json
    {"statusTemplate": {"starting": "Opening the first long and short",
                        "opening": "Opening cycle {cycle} · {paper} PAPER so far",
-                       "open": "{moved}% of {MOVE_PCT}% · {paper} PAPER · ${spent} spent"},
-    "statusExamples": {"cycle": 3, "moved": 0.21, "paper": 108, "spent": 1.54},
+                       "open": "{moved}% of {MOVE_PCT}% · {paper} PAPER · ${spent} spent",
+                       "full": "Papertrade {side} full · waiting"},
+    "statusExamples": {"cycle": 3, "moved": 0.21, "paper": 108, "spent": 1.54, "side": "longs"},
     "statusPlan": {"watching": "the price move from the pair's entry; both legs close at MOVE_PCT",
                    "shows": "how far it has moved toward that, PAPER minted so far, and budget spent",
                    "when": "it checks every minute and closes on the move, so no time is shown",
@@ -127,7 +128,10 @@ Each minute it reads `account`, then:
   `BUDGET_USD` in all, or when a cycle no longer fits in `availableUsd`. It checks the
   budget between cycles, so the last cycle can take it a little past; a wiped-out leg,
   up to that leg's margin past.
-- **Opens** a cycle when none is open: a long, then a short.
+- **Opens** a cycle when none is open and both sides have room under Papertrade's
+  open-interest cap: the tighter side first, so a refusal leaves nothing open. When a side
+  is full it waits, with one note to the owner, and starts once both have room. A cap
+  that fills between the check and the open is not counted as a failure.
 - **Just opened:** waits for all the legs. Some missing after two minutes means Papertrade
   took only part of it: it closes what did open and tries a fresh cycle; three in a row
   and it stops.
@@ -184,6 +188,8 @@ def request(what, *args):
         return False
     status, answer = send(built["bodyFile"])
     bevo.log(f"{what}: {status} {answer}")
+    if status != "201" and "openInterest" in answer:
+        bevo.state["oi_full"] = True
     return status == "201"
 
 
@@ -305,7 +311,9 @@ for tick in bevo.ticks():
             bevo.log(f"cycle {cycles + 1} open: {', '.join(new)}")
         elif waited >= WAIT:
             bevo.state.pop("opening")
-            one_sided = bevo.state.get("one_sided", 0) + 1
+            # Papertrade's open-interest cap filling between the room check and the open
+            # is not a fault: close what opened and wait for room, without counting it.
+            one_sided = bevo.state.get("one_sided", 0) + (0 if bevo.state.pop("oi_full", False) else 1)
             bevo.state["one_sided"] = one_sided
             bevo.log(f"only {len(new)} of 2 legs opened ({one_sided} in a row)")
             if one_sided >= 3:
@@ -338,10 +346,26 @@ for tick in bevo.ticks():
         finish(f"{acct['availableUsd']:,.2f} USD is left, under the {2 * MARGIN:,.2f} a cycle holds")
     if waited < WAIT:
         continue
+    # Papertrade caps open interest per side. Open only when both legs fit, and the
+    # tighter side first, so a refusal leaves nothing open.
+    market = next((m for m in (helper("markets") or {}).get("markets", []) if m["symbol"] == MARKET), None)
+    if market is None:
+        continue
+    room = {"long": market["longRoomUsd"], "short": market["shortRoomUsd"]}
+    full = [side + "s" for side in room if room[side] < MARGIN * LEVERAGE]
+    if full:
+        if not bevo.state.get("told_full"):
+            bevo.notify(f"Papertrade is full on {MARKET} {' and '.join(full)} right now, so your farm is waiting. "
+                        "It starts the next cycle by itself once both sides have room.", push="Farm waiting for room")
+            bevo.state["told_full"] = True
+        bevo.status("full", side=" and ".join(full))
+        continue
+    bevo.state["told_full"] = False
+    bevo.state.pop("oi_full", None)
     bevo.state["opening"] = list(open_by_id)
     bevo.state["sent_at"] = time.time()
     base = ["--owner", owner, "--market", MARKET, "--margin", str(MARGIN), "--leverage", str(LEVERAGE)]
-    for side in ("long", "short"):
+    for side in sorted(room, key=room.get):
         if not request(f"open {side}", "open", *base, "--side", side):
             bevo.log(f"{side} refused; the rest are closed once they show")
             break

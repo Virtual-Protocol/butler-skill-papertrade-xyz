@@ -2,6 +2,14 @@
 
 ## 1.2.0
 
+- **Papertrade's open-interest cap.** `markets` reports `longRoomUsd` and `shortRoomUsd`,
+  the room left under each side's cap. `farm-quote` warns when a leg does not fit. The
+  duty opens only when both legs fit, the tighter side first, and otherwise waits with one
+  note ("Papertrade is full on BTC longs right now, so your farm is waiting"). A cap that
+  fills between the check and the open (`admission_rejected`, `openInterest`) is not
+  counted as a failure. Found live: BTC and ETH longs were both over their caps.
+- The duty files with a `statusTemplate` (lines of 46 characters at most) and a 28-character
+  title, as the Duties list requires; the Butler no longer rewrites the duty to fit.
 - **One farm per market.** The Butler reads the owner's duties first and shows a running
   farm on that market instead of a new ticket; a second would take the first one's legs.
 - `farm-quote` returns `breakEven` and `breakEvenUsdPerPaper`: the PAPER price the cycle
@@ -29,7 +37,7 @@
   stops), and retries a refused close every minute rather than giving up.
 - **Measured:** a $1,000 BTC long closed at -0.22% lost $2.24, paid no fee and minted
   24.08 PAPER (about 10.95 per $1, after Papertrade's 2% carve). The duty is tested
-  against a simulated Papertrade in eight cases.
+  against a simulated Papertrade in ten cases.
 
 ## 1.1.0
 

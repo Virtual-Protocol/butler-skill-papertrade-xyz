@@ -54,7 +54,7 @@ match. A failure there means Papertrade changed its contracts; stop.
 
 | Command | Does |
 | --- | --- |
-| `markets` | the markets Papertrade lists, which are `openable`, `maxLeverage`, `maxPositionUsd`, the minimums `minMarginUsd` / `minPositionUsd`, and `winFeeRate`, the share of a winning close's gain Papertrade keeps |
+| `markets` | the markets Papertrade lists, which are `openable`, `maxLeverage`, `maxPositionUsd`, the minimums `minMarginUsd` / `minPositionUsd`, `winFeeRate`, the share of a winning close's gain Papertrade keeps, and `longRoomUsd` / `shortRoomUsd`, the room left under each side's open-interest cap (an open past it is refused) |
 | `account` | the balance, open positions, deposit address, withdrawal limits and the session key's state (`references/account.md`) |
 | `deposit-plan` | the least to send so a deposit is credited (`sendAtLeastUsd`), counting USDC already waiting at the deposit address and the one-time 1 USDC fee to open it, with `why` to say to the owner. With `--amount`, refuses an amount that would sit uncredited, or confirms it with `amountUsd` and `depositAddress` for the `acp trade` |
 | `key-status` | `action`: `ready`, `renew` (under a day left), `register`, `key-new`, or `fund-first` (the account never had a deposit, and Papertrade takes no key before one); `expiresIn`; and, whenever it is not `ready`, `todo`: the instruction to carry out in the same turn. In a duty, `todo` is to notify the owner, never a card |
@@ -691,6 +691,10 @@ def markets():
             "maxLeverage": m["maxLeverage"],
             "maxPositionUsd": int(m["maxPositionNotional"]) / WAD,
             "priceScale": int(m["priceScale"]),
+            # Papertrade caps open interest per side; an open past the cap is refused
+            # (`admission_rejected`, `openInterest`). Room is what is left under it.
+            "longRoomUsd": round((int(m["longCap"]) - int(m["longOi"])) / WAD, 2),
+            "shortRoomUsd": round((int(m["shortCap"]) - int(m["shortOi"])) / WAD, 2),
         })
     return {"tradingPaused": state.get("tradingPaused"), "minMarginUsd": int(state["minimumTradeSizeRaw"]) / WAD,
             "minPositionUsd": int(state["minimumOpenNotionalRaw"]) / WAD,
@@ -1022,6 +1026,13 @@ def farm_quote(owner, market, margin, leverage, move_pct, budget):
                         f"exit. The farm looks once a minute and a close can wait up to a minute in Papertrade's "
                         f"queue, so a fast move can wipe it out first. {safe}x or lower leaves "
                         f"{FARM_QUEUE_ROOM * 100:.1f}% of room.")
+    room = {"long": m["longRoomUsd"], "short": m["shortRoomUsd"]}
+    full = [side for side in room if room[side] < notional]
+    if full:
+        left = " and ".join(f"${max(0.0, room[side]):,.0f} of {side}s" for side in full)
+        warnings.append(f"Papertrade is full on {m['symbol']} {' and '.join(s + 's' for s in full)} right now: each "
+                        f"leg is ${notional:,.0f}, and there is room for {left}. The farm waits and starts once "
+                        f"both sides have room, which may take a while.")
     if rate is None:
         warnings.append("PAPER per cycle is unknown until this account has closed a losing position: "
                         "Papertrade does not publish its mint rate.")

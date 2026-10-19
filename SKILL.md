@@ -1,8 +1,8 @@
 ---
 name: papertrade-xyz
 description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, and withdraw - with a session key Butler keeps.
-version: 1.1.0
-metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
+version: 1.2.0
+metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade","farm paper","farm on papertrade","papertrade farm","stop farming"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
 ---
 
 ## When to use
@@ -17,7 +17,7 @@ where every trade faces Papertrade's own pool at Hyperliquid's mid price:
 - **Open** - "long BTC 100x with $20": steps 4 to 6 (`quote` first, always).
 - **Close** - "close my BTC long": step 7. Never wait for anything to close.
 - **Withdraw** - "take my money out of Papertrade": step 8.
-- **Automate** - "close it at -$5": a duty (`references/duty.md`).
+- **Automate** - "close it at -$5": `references/duty.md`. Farm: `references/farm.md`.
 
 Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` does not list.
 

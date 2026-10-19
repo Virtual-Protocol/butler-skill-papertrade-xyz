@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.0
+
+- **Farm PAPER.** "Farm PAPER on Papertrade" files a duty that holds a long and a short of
+  the same size on one market, closes both once the price moves `EXIT_MOVE_PCT`, and opens
+  the next pair. The losing leg mints PAPER; the pair costs the 2% fee on the winning leg.
+  The owner gives only a budget: the leg size, leverage and exit come from it
+  (`references/farm.md`), and the plan is said with its bad case in dollars before it is
+  filed.
+- **The farm keeps a tenth of the budget spare.** Each pair loses a few cents to the
+  winning leg's fee, so a budget of exactly two legs runs one pair and stops; 45% a leg
+  keeps the next pair affordable.
+- **It never touches a position it did not open,** closes the other leg at once when one
+  is wiped out, closes a lone leg if Papertrade opened only one, and stops at
+  `MAX_LOSS_USD`, `MAX_CYCLES`, or when a pair no longer fits. Each closed pair is noted in
+  the duty's thread with its PnL and PAPER, without a push.
+- **Measured:** a $1,000 BTC long closed at -0.22% lost $2.24, paid no fee and minted
+  24.08 PAPER. Tested against a simulated Papertrade in six cases: two normal pairs, a
+  refused short, a wiped-out leg, the loss limit, a key that is not ready, and too little
+  money.
+
 ## 1.1.0
 
 - **From a duty:** a duty reads the account and closes (or opens) with the same session

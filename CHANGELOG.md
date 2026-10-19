@@ -2,23 +2,27 @@
 
 ## 1.2.0
 
-- **Farm PAPER.** "Farm PAPER on Papertrade" files a duty that holds a long and a short of
-  the same size on one market, closes both once the price moves `EXIT_MOVE_PCT`, and opens
-  the next pair. The losing leg mints PAPER; the pair costs the 2% fee on the winning leg.
-  The owner gives only a budget: the leg size, leverage and exit come from it
-  (`references/farm.md`), and the plan is said with its bad case in dollars before it is
-  filed.
-- **The farm keeps a tenth of the budget spare.** Each pair loses a few cents to the
-  winning leg's fee, so a budget of exactly two legs runs one pair and stops; 45% a leg
-  keeps the next pair affordable.
-- **It never touches a position it did not open,** closes the other leg at once when one
-  is wiped out, closes a lone leg if Papertrade opened only one, and stops at
-  `MAX_LOSS_USD`, `MAX_CYCLES`, or when a pair no longer fits. Each closed pair is noted in
-  the duty's thread with its PnL and PAPER, without a push.
+- **Farm PAPER, from a ticket.** "I want to farm PAPER" shows the owner every setting at
+  once with its default, the way Papergainz' farm page does: market, margin per leg, pairs
+  per cycle (1 to 6), leverage, move per cycle, trigger stop, hour limit and max cycles.
+  `farm-quote` then says what one cycle costs and mints ("Each cycle costs $0.68 for 54
+  PAPER"), the cost per 1,000 PAPER, how many cycles fit before the stop, and the bad case
+  in dollars, before anything is filed (`references/farm.md`).
+- **The cost is the winning legs' haircut, not a 2% fee.** A winning leg is paid back
+  about 10% less than it made, and less still on small moves; a loss costs nothing extra.
+  `farm-quote` uses Papergainz' haircut model, which reproduces its published BTC cycle
+  ($47,399.20 for 4,290,739 PAPER) to within rounding. PAPER per $1 lost is read from the
+  owner's own losing closes; with none yet it is unknown, never guessed.
+- **The farm duty** opens `PAIRS` longs and shorts, closes them all once price is
+  `MOVE_PCT` from their average entry, notes each cycle in its thread without a push, and
+  repeats. It closes every farm leg and stops at the hour limit, at the trigger stop, or
+  when price moves 1% inside a minute; with nothing open it also stops at max cycles or
+  when a cycle no longer fits. It never touches a position it did not open, closes the
+  rest at once when a leg is wiped out, closes a part-opened cycle (three in a row and it
+  stops), and retries a refused close every minute rather than giving up.
 - **Measured:** a $1,000 BTC long closed at -0.22% lost $2.24, paid no fee and minted
-  24.08 PAPER. Tested against a simulated Papertrade in six cases: two normal pairs, a
-  refused short, a wiped-out leg, the loss limit, a key that is not ready, and too little
-  money.
+  24.08 PAPER (about 10.95 per $1, after Papertrade's 2% carve). The duty is tested
+  against a simulated Papertrade in ten cases.
 
 ## 1.1.0
 

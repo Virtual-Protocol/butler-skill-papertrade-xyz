@@ -36,9 +36,17 @@ Farm ticket — Papertrade (you have $<availableUsd>)
   Max cycles         ___     a number, or "no limit"
 ```
 
-Ask again for only the fields still blank, showing what they have filled. "You pick",
-"default" or "go" is not a value: say each blank needs their number. Never suggest a
-leverage higher than one they named. A field they gave earlier in the conversation
+Ask again for only the fields still blank, showing what they have filled.
+
+**Never fill a field for them, even when asked.** Not a value, not a "what I'd go with",
+not a list of picks to confirm: the farm opens legs with no one asking, so every number
+has to be one they typed. "You pick", "default", "whatever" or "go" is not a value:
+
+> I can't choose these for you: the farm trades on its own once it starts, so each number
+> has to be yours. Still blank: leverage, move per cycle, trigger stop, hour limit, max
+> cycles.
+
+Never suggest a leverage higher than one they named. A field they gave earlier in the conversation
 counts once you repeat it back in the ticket.
 
 Then quote it. It signs nothing, refuses settings that cannot work (and says which value

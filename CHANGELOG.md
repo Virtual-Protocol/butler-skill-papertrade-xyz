@@ -2,6 +2,10 @@
 
 ## 1.2.0
 
+- **One farm per market.** The Butler reads the owner's duties first and shows a running
+  farm on that market instead of a new ticket; a second would take the first one's legs.
+- `farm-quote` returns `breakEven` and `breakEvenUsdPerPaper`: the PAPER price the cycle
+  only pays off above, said with "it buys PAPER with fees; it is not a return".
 - **Farm PAPER, from a ticket.** "I want to farm PAPER" shows the owner a blank ticket, the
   fields of Papergainz' farm page: market, margin per leg, pairs per cycle (1 to 6),
   leverage, move per cycle, trigger stop, hour limit and max cycles. Nothing is assumed:

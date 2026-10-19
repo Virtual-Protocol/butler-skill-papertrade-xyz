@@ -17,7 +17,10 @@ at 0.3%. `farm-quote` works it out; never do the arithmetic yourself.
 
 ## The ticket
 
-"I want to farm PAPER" means a farm duty. Never assume a setting: no leverage, size, move
+"I want to farm PAPER" means a farm duty. **One farm per market:** read the owner's duties
+first, and if a farm on that market is running (titled "Farm PAPER: <MARKET> ..."), say so
+and show it instead of a new ticket. A second one would take the first one's legs for its
+own. A farm on the other market is fine. Never assume a setting: no leverage, size, move
 or stop is the owner's until they say it. Show the ticket with every field blank, its
 limits beside it, and this turn's `availableUsd`, and ask them to fill it in:
 
@@ -51,7 +54,7 @@ Otherwise say, from its fields only:
 
 > **{badCase}**
 >
-> **{summary}** That is {costPer1kPaperUsd} per 1,000 PAPER. The losing leg pays
+> **{summary}** {breakEven} That is {costPer1kPaperUsd} per 1,000 PAPER. The losing leg pays
 > {losingLegsPayUsd}; the winning leg keeps {winningLegsKeepUsd} ({winningKeepsPct}%).
 >
 > BTC is at {markPrice}; this cycle closes at {exitDownPrice} or {exitUpPrice}. At your
@@ -73,8 +76,8 @@ their yes to every leg the farm opens: a duty asks no one before it opens.
    python3 /tmp/papertrade.py duty-helper --owner <OWNER>
    ```
 
-3. File the duty below with a `timer` trigger every 60 seconds, and in `PARAMS`, as
-   numbers: `PAPERTRADE_HELPER` (the `helper` path), `MARKET`, `MARGIN_USD`, `LEVERAGE`,
+3. Check again that no farm runs on that market. Then file the duty below with a `timer`
+   trigger every 60 seconds, and in `PARAMS`, as numbers: `PAPERTRADE_HELPER` (the `helper` path), `MARKET`, `MARGIN_USD`, `LEVERAGE`,
    `MOVE_PCT`, `PAIRS`, `STOP_BELOW_USD`, `HOUR_LIMIT` and `MAX_CYCLES` (0 for none),
    exactly as quoted. Title it after the ticket, such as "Farm PAPER: BTC $10 x 100x
    ±0.5%".

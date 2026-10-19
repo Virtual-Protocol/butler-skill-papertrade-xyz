@@ -67,7 +67,7 @@ match. A failure there means Papertrade changed its contracts; stop.
 | `history` | closed positions, newest first, with `pnlUsd` and `pnlPct` as Papertrade's app computes them (adjusted PnL less the fee; a liquidation is minus the margin), and a `summary` (`references/account.md`) |
 | `cashflows` | deposits and withdrawals with their `status`; a withdrawal is done at `settled` |
 | `intents` | Papertrade's queue for the owner; with `--intent`, `stillQueued` for one request. Neither queued nor in `account` means it did not go through |
-| `farm-quote` | the farm ticket, signing nothing: one cycle's `costPerCycleUsd` (the winning legs' haircut and Papertrade's win fee) and `paperPerCycle` (PAPER per $1 lost is read from the owner's own losing closes; `null` until there is one), `costPer1kPaperUsd`, `cyclesBeforeStop`, `wipedOutAtMovePct`, `safeLeverage`, exit prices, and `summary`, `badCase` and `warnings` to say (`references/farm.md`). Refuses settings that cannot work |
+| `farm-quote` | the farm ticket, signing nothing: one cycle's `costPerCycleUsd` (the winning legs' haircut and Papertrade's win fee) and `paperPerCycle` (PAPER per $1 lost is read from the owner's own losing closes; `null` until there is one), `costPer1kPaperUsd`, `breakEvenUsdPerPaper`, `cyclesBeforeStop`, `wipedOutAtMovePct`, `safeLeverage`, exit prices, and `summary`, `breakEven`, `badCase` and `warnings` to say (`references/farm.md`). Refuses settings that cannot work |
 | `withdraw-typed-data` / `withdraw-body` | the owner's signature for a withdrawal to their Hyperliquid account |
 
 A duty may run every command except `key-new`, `duty-helper` and the owner steps, which each need the owner and are refused there.
@@ -1048,6 +1048,11 @@ def farm_quote(owner, market, margin, leverage, move_pct, pairs, stop_below, hou
         "wipedOutAtMovePct": round(wipeout * 100, 2), "safeLeverage": safe,
         "summary": (f"Each cycle costs {money(cost)} for {round(paper):,} PAPER." if paper else
                     f"Each cycle costs {money(cost)}; the PAPER it mints is unknown until your first losing close."),
+        "breakEvenUsdPerPaper": round(cost / paper, 5) if paper else None,
+        "breakEven": (f"It is worth it only if PAPER is worth more than {cost / paper * 100:.2f} cents to you. "
+                      f"This buys PAPER with fees; it is not a return, and I can't tell you what PAPER is worth."
+                      if paper else
+                      "This buys PAPER with fees; it is not a return, and I can't tell you what PAPER is worth."),
         "badCase": (f"If {m['symbol']} moves more than {wipeout * 100:.2f}% before a close goes through, the losing "
                     f"leg{'s are' if pairs > 1 else ' is'} wiped out: up to {money(pairs * margin)} that cycle "
                     f"instead of {money(cost)}."),

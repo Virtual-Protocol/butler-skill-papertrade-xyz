@@ -1,8 +1,8 @@
 ---
 name: papertrade-xyz
-description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, and withdraw - with a session key Butler keeps.
-version: 1.1.0
-metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
+description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund, open a long or a short, close it, withdraw, or farm PAPER with a hedged pair - with a session key Butler keeps.
+version: 1.2.0
+metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade","farm paper","paper farm","papergainz","mint paper"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
 ---
 
 ## When to use
@@ -18,6 +18,8 @@ where every trade faces Papertrade's own pool at Hyperliquid's mid price:
 - **Close** - "close my BTC long": step 7. Never wait for anything to close.
 - **Withdraw** - "take my money out of Papertrade": step 8.
 - **Automate** - "close it at -$5": a duty (`references/duty.md`).
+
+Farming PAPER is `references/farm.md`.
 
 Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` does not list.
 
@@ -55,9 +57,9 @@ Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` doe
    python3 /tmp/papertrade.py markets
    ```
 
-   `<OWNER>` is `user.agentWalletAddress` from `bevo-read me`, always. Relay the read's
-   figures as given (`references/account.md`). Then look at
-   `sessionKey.action` (step 2) on **every** read, whatever the owner asked.
+   `<OWNER>` is `user.agentWalletAddress` from `bevo-read me`, always. Relay its figures
+   as given (`references/account.md`), and check `sessionKey.action` (step 2) on **every**
+   read, whatever the owner asked.
 
 2. [FIXED] Keep the session key usable. When `sessionKey.todo` is set, do it in this same
    turn, before you reply: file the card, then tell the owner it is waiting in the app.
@@ -79,7 +81,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` doe
 
    `key-new` only for `key-new`. `<typedDataFile>` and `<readingFile>` are the paths
    `register-typed-data` printed; never edit those files. The reply is an approval card:
-   tell the owner what it lets Butler do and to approve it in the app. Then step 9 with
+   tell the owner what it lets Butler do and to approve it in the app. Then step 10 with
    `<KEY>:register`, and with the signature:
 
    ```sh
@@ -99,9 +101,8 @@ Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` doe
    acp trade --token-in usdc --amount-in <amountUsd> --token-out usdc --chain-out 1337 --recipient <depositAddress> --idempotency-key <KEY>:deposit
    ```
 
-   No amount, or refused: say its `why` and ask for at least `sendAtLeastUsd`; never
-   offer a smaller one. Use the plan's `amountUsd` and `depositAddress` exactly; never
-   another chain than `1337`. The reply is a card; once it confirms (step 9,
+   No amount, or refused: say its `why`, ask for at least `sendAtLeastUsd`, never less. Use the plan's `amountUsd` and `depositAddress` exactly; never
+   another chain than `1337`. The reply is a card; once it confirms (step 10,
    `--route trade`), read `account` until `availableUsd` rises (`pendingDepositUsd`
    still waits).
 
@@ -134,7 +135,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` doe
    ```
 
    `201` is queued, not filled: the position appears in `positions` within seconds. Not
-   there after half a minute: "Accepted but not landed" below.
+   there after 30s: "Accepted but not landed" below.
 
 7. [FIXED] Close as soon as they ask, with ids from this turn's `positions` (at most 12):
 
@@ -158,24 +159,27 @@ Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` doe
    acp wallet sign-typed-data --data "$(cat <typedDataFile>)" --chain-id 999 --purpose "Withdraw <USDC> USDC from Papertrade to your Hyperliquid account" --reading "$(cat <readingFile>)" --idempotency-key <KEY>:withdraw
    ```
 
-   Approval card; then step 9 with `<KEY>:withdraw`, and:
+   Approval card; then step 10 with `<KEY>:withdraw`, and:
 
    ```sh
    python3 /tmp/papertrade.py withdraw-body --owner <OWNER> --signature <SIGNATURE>
    curl -sS -X POST https://exchange.papertrade.xyz/intents -H "Content-Type: application/json" --data @<bodyFile> -w "\n%{http_code}\n"
    ```
 
-   The signature is good for one hour; past that, build it again and file a new card.
-   It is done when `cashflows` shows the withdrawal `settled`.
+   The signature lasts an hour; past that, build it again and file a new card. Done when
+   `cashflows` shows the withdrawal `settled`.
 
-9. [FIXED] Wait for a card's outcome; never file it again to find out:
+9. [ADAPT] To farm PAPER, follow `references/farm.md`. Its cost is the fee, not the
+   loss: the legs cancel.
+
+10. [FIXED] Wait for a card's outcome; never file it again to find out:
 
    ```sh
    bevo-read request <KEY>:<OP> --route execute
    ```
 
-   A card exists only once this finds it: run it right after filing, and never tell the
-   owner a card is waiting before it does. `not_found` - nothing was filed; say so.
+   A card exists only once this finds it: run it right after filing, and never say a card
+   is waiting before it does. `not_found` - nothing was filed; say so.
    `approvalStatus: confirmed` - `approvalOutcome.signature` is the `<SIGNATURE>`.
    `rejected` or `failed` - nothing was signed; give the reason as written. `pending` -
    still with the owner: say so and stop until they come back.
@@ -206,14 +210,16 @@ python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 
 ## Failure handling
 
+`+` rows are `admission_rejected` with that reason.
+
 | Answer | What to do |
 | --- | --- |
-| `admission_rejected` + `noDeposit` | Fund first (step 3), then register (step 2). |
-| `admission_rejected` + `funding` | Not enough available; re-read `account` and say so. |
-| `admission_rejected` + `belowMinimum`, `belowMinimumNotional`, `leverageTooHigh`, `positionTooLarge`, `openInterest` | Give the reason and ask; never resize it yourself. |
-| `admission_rejected` + `tradingPaused`, `marketPaused`, `inactiveInstrument` | Not taking that trade now; closing still works. |
-| `admission_rejected` + `noOpenPositions` | Already closed or closing. Re-read `account`. |
-| `admission_rejected` + `sessionKeyLimit` | Too many keys registered; never make another. Say so and stop. |
+| `+ noDeposit` | Fund first (step 3), then register (step 2). |
+| `+ funding` | Not enough available; re-read `account` and say so. |
+| `+ belowMinimum`, `belowMinimumNotional`, `leverageTooHigh`, `positionTooLarge`, `openInterest` | Give the reason and ask; never resize it yourself. |
+| `+ tradingPaused`, `marketPaused`, `inactiveInstrument` | Not taking that trade now; closing still works. |
+| `+ noOpenPositions` | Already closed or closing. Re-read `account`. |
+| `+ sessionKeyLimit` | Too many keys registered; never make another. Say so and stop. |
 | `unauthorized_intent` | The key is not usable: read `account`, then step 2. |
 | `deadline_expired` | Build it again; for an owner step, a new card. |
 | `intent_conflict` | That intent is already in; read `account`. |

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0
+
+- **Farms PAPER with a hedged pair** (`references/farm.md`): a long and a short of equal
+  size on one market, closed together once the move is there. Price cancels between the
+  legs, the losing one mints, and the duty runs it unattended to a fee budget.
+- Says the cost as the **fee**, not the loss. The legs offset, so a cycle costs about 2%
+  of the move - break-even is around $0.0002 a PAPER, not the ~$0.01 an unhedged loser
+  needs. Quoting the loss would scare an owner off something they asked for.
+- The farm never leaves a lone leg: it opens only from flat, unwinds a half-opened pair,
+  and stops rather than retrying when it cannot tell what landed.
+- Refuses settings where `CLOSE_AT_MOVE_PCT` is more than half of `wipedOutAtMovePct` -
+  a liquidated leg leaves the other running alone.
+
 ## 1.1.0
 
 - **From a duty:** a duty reads the account and closes (or opens) with the same session

@@ -17,25 +17,26 @@ out; never do the arithmetic yourself.
 
 ## The ticket
 
-When the owner asks to farm ("I want to farm PAPER"), show them every field at once with
-its default, and ask them to change any or say "go":
+"I want to farm PAPER" means a farm duty. Never assume a setting: no leverage, size, move
+or stop is the owner's until they say it. Show the ticket with every field blank, its
+limits beside it, and this turn's `availableUsd`, and ask them to fill it in:
 
 ```text
-Farm ticket — Papertrade
-  Market             BTC          (BTC or ETH)
-  Margin per leg     $10          (at least $10, and margin x leverage at least $1,000)
-  Pairs per cycle    1            (1 to 6; each pair is a long and a short)
-  Leverage           100x
-  Move per cycle     ±0.5%        (both legs close once price moves this far, either way)
-  Trigger stop       $<balance - 2 x margin x pairs, at least $0>   (stop and close all under this balance)
-  Hour limit         12
-  Max cycles         no limit
+Farm ticket — Papertrade (you have $<availableUsd>)
+  Market             ___     BTC or ETH
+  Margin per leg     $___    at least $10, and margin x leverage at least $1,000
+  Pairs per cycle    ___     1 to 6; each pair is a long and a short
+  Leverage           ___x    the losing leg is wiped out at about a (100 / leverage)% move
+  Move per cycle     ±___%   both legs close once price moves this far, either way
+  Trigger stop       $___    stop, and close everything, under this balance
+  Hour limit         ___     stop after this many hours
+  Max cycles         ___     a number, or "no limit"
 ```
 
-Defaults: `BTC`; margin `10`; pairs `1`; leverage `100`; move `0.5`; hour limit `12`; no
-cycle limit. A different margin keeps `LEVERAGE` at `100` unless they say otherwise. Fill
-in the trigger stop from this turn's `availableUsd`. "You pick" or "go" takes the
-defaults as shown; that is their choice, because they saw every value.
+Ask again for only the fields still blank, showing what they have filled. "You pick",
+"default" or "go" is not a value: say each blank needs their number. Never suggest a
+leverage higher than one they named. A field they gave earlier in the conversation
+counts once you repeat it back in the ticket.
 
 Then quote it. It signs nothing, refuses settings that cannot work (and says which value
 to change), and works out the cycle:
@@ -44,7 +45,8 @@ to change), and works out the cycle:
 python3 /tmp/papertrade.py farm-quote --owner <OWNER> --market <MARKET> --margin <USD> --leverage <N> --move <PCT> --pairs <N> --stop-below <USD> --hours <H> --max-cycles <N>
 ```
 
-A refusal is said as written, and the ticket shown again with that field marked.
+Quote only once every field has their value. A refusal is said as written, and the ticket
+shown again with that field marked for them to change.
 Otherwise say, from its fields only:
 
 > **{badCase}**

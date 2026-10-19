@@ -2,9 +2,10 @@
 
 ## 1.2.0
 
-- **Farm PAPER, from a ticket.** "I want to farm PAPER" shows the owner every setting at
-  once with its default, the way Papergainz' farm page does: market, margin per leg, pairs
-  per cycle (1 to 6), leverage, move per cycle, trigger stop, hour limit and max cycles.
+- **Farm PAPER, from a ticket.** "I want to farm PAPER" shows the owner a blank ticket, the
+  fields of Papergainz' farm page: market, margin per leg, pairs per cycle (1 to 6),
+  leverage, move per cycle, trigger stop, hour limit and max cycles. Nothing is assumed:
+  the owner fills in every field, and the farm duty is filed only after that.
   `farm-quote` then says what one cycle costs and mints ("Each cycle costs $0.68 for 54
   PAPER"), the cost per 1,000 PAPER, how many cycles fit before the stop, and the bad case
   in dollars, before anything is filed (`references/farm.md`).

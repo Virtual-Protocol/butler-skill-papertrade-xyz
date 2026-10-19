@@ -2,8 +2,8 @@
 
 Teaches a Butler agent to trade BTC and ETH perpetuals on
 [Papertrade](https://papertrade.xyz) for its owner: check the balance and open positions,
-fund the account, open and close positions, withdraw, and report closed positions with
-their PnL. A duty can use it too, for example to close a position at a stop or a target.
+fund the account, open and close positions, withdraw, report closed positions with
+their PnL, and stake PAPER and claim its USDC rewards. A duty can use it too, for example to close a position at a stop or a target.
 
 Two things shape how it works:
 
@@ -14,9 +14,10 @@ Two things shape how it works:
   trades but cannot move it anywhere. It lives in `~/.papertrade/session-key.json`, outside
   the skill directory that a hub update replaces. A duty signs with the same key through a
   copy of the helper kept beside it, under a lock so the two never reuse a nonce.
-- **Registering the key and withdrawing need the owner.** Both are EIP-712 signatures from
-  the owner's wallet, filed as approval cards. The key lasts 30 days, and the skill renews
-  it a day before it expires, because the owner may not be there to approve the card.
+- **Registering the key, withdrawing and staking need the owner.** Each is an EIP-712
+  signature from the owner's wallet, filed as an approval card. The key lasts 30 days,
+  and the skill renews it a day before it expires, because the owner may not be there to
+  approve the card.
 
 One Butler skill, published by the
 [Butler skill hub](https://github.com/Virtual-Protocol/butler-skills): the hub's
@@ -25,7 +26,8 @@ One Butler skill, published by the
 - `SKILL.md` — the playbook (see the hub's
   [SKILL_STANDARD.md](https://github.com/Virtual-Protocol/butler-skills/blob/main/SKILL_STANDARD.md))
 - `references/` — what the playbook points to: the account, the session key, the API,
-  running it from a duty, and `helper.md`, the helper script the agent extracts and runs
+  PAPER staking, running it from a duty, and `helper.md`, the helper script the agent
+  extracts and runs
 - `CHANGELOG.md` — one entry per version; every change bumps `version` in SKILL.md
 
 `references/helper.md` holds the tested script verbatim. Change the script, test it, and

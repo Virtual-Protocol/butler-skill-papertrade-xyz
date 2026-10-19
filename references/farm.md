@@ -48,6 +48,10 @@ has to be one they typed. "You pick", "default", "whatever" or "go" is not a val
 Never suggest a leverage higher than one they named. A field they gave earlier in the conversation
 counts once you repeat it back in the ticket.
 
+**Never judge Papertrade's room yourself.** A leg needs room for its whole position
+(margin x leverage, such as $1,000), so $16 of room is full, not "room". Leave
+`longRoomUsd`/`shortRoomUsd` out of the ticket; `farm-quote` says when a side is full.
+
 Then quote it. It signs nothing, refuses settings that cannot work (and says which value
 to change), and works out the cycle:
 

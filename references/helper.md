@@ -24,6 +24,13 @@ python3 /tmp/papertrade.py history --owner <OWNER> --limit 20
 python3 /tmp/papertrade.py cashflows --owner <OWNER>
 python3 /tmp/papertrade.py withdraw-typed-data --owner <OWNER> --amount 12.5
 python3 /tmp/papertrade.py withdraw-body --owner <OWNER> --signature <SIGNATURE>
+python3 /tmp/papertrade.py staking --owner <OWNER>
+python3 /tmp/papertrade.py stake-typed-data --owner <OWNER> --amount 1000
+python3 /tmp/papertrade.py stake-body --owner <OWNER> --signature <SIGNATURE>
+python3 /tmp/papertrade.py unstake-typed-data --owner <OWNER> --amount all
+python3 /tmp/papertrade.py unstake-body --owner <OWNER> --signature <SIGNATURE>
+python3 /tmp/papertrade.py claim-typed-data --owner <OWNER>
+python3 /tmp/papertrade.py claim-body --owner <OWNER> --signature <SIGNATURE>
 ```
 
 It prints one JSON object on stdout. Exit `0`: done. Exit `1`: refused or unreachable,
@@ -39,6 +46,7 @@ the command line was wrong.
 | `~/.papertrade/.lock` | taken while a nonce is used or the key file written, so a chat and a duty never sign with the same nonce |
 | `~/.papertrade/config.json` | Papertrade's contract addresses, read from its app and checked on-chain, for a day |
 | `~/.papertrade/pending-*.json` | an owner step waiting for its signature |
+| `~/.papertrade/paper-nonce.json` | the last staking nonce handed out, so two staking cards never share one |
 | `typedDataFile` (`/tmp/pt-<id>-typed.json`) | the typed data for `acp wallet sign-typed-data --data` |
 | `readingFile` (`/tmp/pt-<id>-reading.json`) | the card's plain-language reading of it, for `--reading`; computed from the signed fields, never edited |
 | `bodyFile` (`/tmp/pt-<id>-body.json`) | the request to send to `/intents` |
@@ -50,12 +58,16 @@ printed, so two conversations building at once never send each other's request.
 chain agrees: its session-key manager must point back to it, and the signing domain must
 match. A failure there means Papertrade changed its contracts; stop.
 
+It checks PAPER staking the same way: PaperStaking must point back to the Exchange, its
+own signing domain must match, and the token must be PAPER. A failure there is kept as
+`paperProblem` and refuses only the staking commands, so trading and closing go on.
+
 ## Commands
 
 | Command | Does |
 | --- | --- |
 | `markets` | the markets Papertrade lists, which are `openable`, `maxLeverage`, `maxPositionUsd`, and the minimums `minMarginUsd` / `minPositionUsd` |
-| `account` | the balance, open positions, deposit address, withdrawal limits and the session key's state (`references/account.md`) |
+| `account` | the balance, open positions, deposit address, withdrawal limits, PAPER and the session key's state (`references/account.md`) |
 | `deposit-plan` | the least to send so a deposit is credited (`sendAtLeastUsd`), counting USDC already waiting at the deposit address and the one-time 1 USDC fee to open it, with `why` to say to the owner. With `--amount`, refuses an amount that would sit uncredited, or confirms it with `amountUsd` and `depositAddress` for the `acp trade` |
 | `key-status` | `action`: `ready`, `renew` (under a day left), `register`, `key-new`, or `fund-first` (the account never had a deposit, and Papertrade takes no key before one); `expiresIn`; and, whenever it is not `ready`, `todo`: the instruction to carry out in the same turn. In a duty, `todo` is to notify the owner, never a card |
 | `key-new` | makes a session key and prints only its address; refuses whenever one exists |
@@ -68,11 +80,21 @@ match. A failure there means Papertrade changed its contracts; stop.
 | `cashflows` | deposits and withdrawals with their `status`; a withdrawal is done at `settled` |
 | `intents` | Papertrade's queue for the owner; with `--intent`, `stillQueued` for one request. Neither queued nor in `account` means it did not go through |
 | `withdraw-typed-data` / `withdraw-body` | the owner's signature for a withdrawal to their Hyperliquid account |
+| `staking` | PAPER in the wallet and staked, USDC rewards to claim, the minimum stake, and `stakeNote` / `unstakeNote` / `claimNote`: why that action cannot run now (`references/staking.md`) |
+| `stake-typed-data` / `stake-body` | the owner's signature to stake PAPER; `--amount` in PAPER, or `all` |
+| `unstake-typed-data` / `unstake-body` | the owner's signature to unstake PAPER back to the wallet; `--amount` in PAPER, or `all` |
+| `claim-typed-data` / `claim-body` | the owner's signature to claim the USDC rewards into the Papertrade balance |
 
-A duty may run every command except `key-new`, `duty-helper` and the owner steps, which each need the owner and are refused there.
+A duty may run every command except `key-new`, `duty-helper` and the owner steps (staking's
+included), which each need the owner and are refused there.
 
 The `-body` commands check that the signature recovers to the owner before writing the
 request; a signature from any other wallet is refused and nothing is written.
+
+The staking `-typed-data` commands make every check Papertrade makes first (paused, the
+minimum stake, the wallet or staked balance, rewards to claim) and refuse with the
+sentence to say, so the owner never approves a card Papertrade would only refuse. Each
+also prints `purpose`, the card's one line.
 
 ## The script
 
@@ -103,6 +125,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from decimal import Decimal, InvalidOperation
 
 API = "https://exchange.papertrade.xyz"
 RPC = "https://rpc.hyperliquid.xyz/evm"
@@ -129,6 +152,7 @@ CONFIG_FILE = os.path.join(HOME, "config.json")
 LOCK_FILE = os.path.join(HOME, ".lock")
 DUTY_COPY = os.path.join(HOME, "papertrade.py")
 PENDING = os.path.join(HOME, "pending-{}.json")
+PAPER_NONCE_FILE = os.path.join(HOME, "paper-nonce.json")
 SCRATCH_DIR = "/tmp"
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 SESSION_TTL = 30 * 24 * 3600
@@ -156,7 +180,13 @@ TYPES = {
                      ("nonce", "uint256"), ("deadline", "uint64")],
     "Close": [("user", "address"), ("positionIds", "uint256[]"), ("nonce", "uint256"), ("deadline", "uint64")],
     "WithdrawToCore": [("user", "address"), ("amount", "uint256"), ("nonce", "uint256"), ("deadline", "uint64")],
+    "Stake": [("user", "address"), ("amount", "uint256"), ("nonce", "uint256"), ("deadline", "uint64")],
+    "Unstake": [("user", "address"), ("amount", "uint256"), ("nonce", "uint256"), ("deadline", "uint64")],
+    "Claim": [("user", "address"), ("nonce", "uint256"), ("deadline", "uint64")],
 }
+# Staking intents are signed against the PaperStaking contract, under its own domain.
+PAPER_TYPES = {"Stake": "paperStake", "Unstake": "paperUnstake", "Claim": "paperClaim"}
+PAPER_DOMAIN_NAME = "PaperStaking"
 
 INSTRUMENT_FIELDS = [
     "id", "symbol", "assetIndex", "priceScale", "active", "paused", "terminal", "retired", "closeOnly",
@@ -333,14 +363,24 @@ def struct_hash(primary, message) -> bytes:
     return keccak(out)
 
 
-def domain_separator(exchange) -> bytes:
+def domain_separator(contract, name=DOMAIN_NAME) -> bytes:
     th = keccak(b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
-    return keccak(th + keccak(DOMAIN_NAME.encode()) + keccak(DOMAIN_VERSION.encode())
-                  + CHAIN_ID.to_bytes(32, "big") + _word("address", exchange))
+    return keccak(th + keccak(name.encode()) + keccak(DOMAIN_VERSION.encode())
+                  + CHAIN_ID.to_bytes(32, "big") + _word("address", contract))
 
 
-def digest_of(exchange, primary, message) -> bytes:
-    return keccak(b"\x19\x01" + domain_separator(exchange) + struct_hash(primary, message))
+def _domain(cfg, primary):
+    """The domain name and verifying contract an intent is signed under."""
+    if primary in PAPER_TYPES:
+        if not cfg.get("paperStaking"):
+            raise Refused(cfg.get("paperProblem") or "PAPER staking is not configured")
+        return PAPER_DOMAIN_NAME, cfg["paperStaking"]
+    return DOMAIN_NAME, cfg["exchange"]
+
+
+def digest_of(cfg, primary, message) -> bytes:
+    name, contract = _domain(cfg, primary)
+    return keccak(b"\x19\x01" + domain_separator(contract, name) + struct_hash(primary, message))
 
 
 def wire(primary, message):
@@ -362,13 +402,14 @@ def intent_id(digest: bytes, signer: str) -> str:
     return "0x" + keccak(keccak(b"papertrade:intent-id:v2") + digest + bytes.fromhex(signer[2:])).hex()
 
 
-def typed_data(exchange, primary, message):
+def typed_data(cfg, primary, message):
     """The JSON `acp wallet sign-typed-data --data` takes."""
+    name, contract = _domain(cfg, primary)
     types = {"EIP712Domain": [{"name": "name", "type": "string"}, {"name": "version", "type": "string"},
                               {"name": "chainId", "type": "uint256"}, {"name": "verifyingContract", "type": "address"}],
              primary: [{"name": n, "type": t} for n, t in TYPES[primary]]}
-    return {"domain": {"name": DOMAIN_NAME, "version": DOMAIN_VERSION, "chainId": CHAIN_ID,
-                       "verifyingContract": exchange},
+    return {"domain": {"name": name, "version": DOMAIN_VERSION, "chainId": CHAIN_ID,
+                       "verifyingContract": contract},
             "types": types, "primaryType": primary, "message": wire(primary, message)}
 
 
@@ -456,18 +497,18 @@ def _owner(value):
 
 def config(refresh=False):
     cached = None if refresh else _read_json(CONFIG_FILE)
-    if cached and cached.get("verifiedAt", 0) > time.time() - 86400:
+    if cached and "paperStaking" in cached and cached.get("verifiedAt", 0) > time.time() - 86400:
         return cached
     nav = {"Accept": "text/html", "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none"}
     status, html = _http(API + "/trade", headers=nav)
     if status != 200:
         raise Refused(f"Papertrade's app answered {status}; cannot read its contract address")
-    found = None
+    found, contracts = None, ""
     for path in sorted(set(re.findall(r'/assets/[A-Za-z0-9_.-]+\.js', html)), key=lambda p: "wire" not in p):
         status, js = _http(API + path)
-        m = re.search(r'contracts:\{exchange:`(0x[0-9a-fA-F]{40})`', js) if status == 200 else None
+        m = re.search(r'contracts:\{exchange:`(0x[0-9a-fA-F]{40})`[^}]*', js) if status == 200 else None
         if m:
-            found = m.group(1).lower()
+            found, contracts = m.group(1).lower(), m.group(0)
             break
     if not found:
         raise Refused("could not find the Exchange address in Papertrade's app")
@@ -476,9 +517,37 @@ def config(refresh=False):
         raise Refused("on-chain check failed: the session-key manager does not point back to this Exchange")
     if eth_call(manager, _sel("DOMAIN_SEPARATOR()")) != domain_separator(found).hex():
         raise Refused("on-chain check failed: the signing domain does not match; Papertrade changed its contracts")
-    cfg = {"exchange": found, "sessionKeyManager": manager, "chainId": CHAIN_ID, "verifiedAt": int(time.time())}
+    cfg = {"exchange": found, "sessionKeyManager": manager, "chainId": CHAIN_ID,
+           **_paper_config(contracts, found), "verifiedAt": int(time.time())}
     _write_private(CONFIG_FILE, cfg)
     return cfg
+
+
+def _paper_config(contracts, exchange):
+    """PAPER's addresses, checked like the Exchange's. A failure here is kept as
+    `paperProblem` rather than raised: staking must never stop a trade or a close."""
+    staking = re.search(r'paperStaking:`(0x[0-9a-fA-F]{40})`', contracts)
+    token = re.search(r'[{,]paper:`(0x[0-9a-fA-F]{40})`', contracts)
+    if not staking or not token:
+        return {"paperStaking": None, "paperProblem": "could not find PAPER staking's address; staking is unavailable"}
+    staking, token = staking.group(1).lower(), token.group(1).lower()
+    if _addr_word(eth_call(staking, _sel("exchange()"))) != exchange:
+        problem = "on-chain check failed: PAPER staking does not point back to this Exchange"
+    elif eth_call(staking, _sel("DOMAIN_SEPARATOR()")) != domain_separator(staking, PAPER_DOMAIN_NAME).hex():
+        problem = "on-chain check failed: PAPER staking's signing domain does not match; Papertrade changed it"
+    elif _abi_string(eth_call(token, _sel("symbol()"))) != "PAPER":
+        problem = "on-chain check failed: the PAPER token address is not PAPER"
+    else:
+        return {"paperStaking": staking, "paperToken": token}
+    return {"paperStaking": None, "paperProblem": problem}
+
+
+def _abi_string(hexdata):
+    w = _words(hexdata)
+    try:
+        return bytes.fromhex("".join(w[2:]))[:int(w[1], 16)].decode()
+    except (IndexError, ValueError):
+        return ""
 
 
 # ---- session key ----------------------------------------------------------------
@@ -602,23 +671,44 @@ def _utc_date(ts):
     return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(ts)))
 
 
-def owner_typed(owner, primary, extra, reading):
+def owner_typed(owner, primary, extra, reading, purpose=None):
     """Owner-signed intents: write the typed data and the card's reading, keep the message for the body.
 
     The reading is computed here from the message itself, never written by the model, so
     the owner's card says in plain words what the signed fields do."""
     cfg = config()
-    k = _load_key(owner)
-    if not k:
-        raise Refused("no session key: run `key-new` first")
-    message = {"user": owner, **extra, "nonce": _take_nonce(owner), "deadline": _now() + DEADLINE}
-    td = typed_data(cfg["exchange"], primary, message)
+    if primary in PAPER_TYPES:
+        nonce = _paper_nonce(cfg, owner)
+    else:
+        if not _load_key(owner):
+            raise Refused("no session key: run `key-new` first")
+        nonce = _take_nonce(owner)
+    message = {"user": owner, **extra, "nonce": nonce, "deadline": _now() + DEADLINE}
+    td = typed_data(cfg, primary, message)
     typed_file = _scratch("typed", td)
     reading_file = _scratch("reading", reading(message))
     _write_private(PENDING.format(primary), {"primary": primary, "message": wire(primary, message)})
-    return {"typedDataFile": typed_file, "readingFile": reading_file, "primaryType": primary,
-            "deadline": message["deadline"],
-            "next": "file it with acp wallet sign-typed-data using these two files; the owner has 1 hour to approve"}
+    out = {"typedDataFile": typed_file, "readingFile": reading_file, "primaryType": primary,
+           "deadline": message["deadline"],
+           "next": "file it with acp wallet sign-typed-data using these two files; the owner has 1 hour to approve"}
+    return {**out, "purpose": purpose} if purpose else out
+
+
+def _paper_nonce(cfg, owner):
+    """PaperStaking keeps its own nonces, apart from the session key's: `nonces` is one past
+    the highest it has used. Also past the last one handed out here, so a second card built
+    before the first lands never reuses it."""
+    owner_word = _word("address", owner).hex()
+    with _Locked():
+        last = _read_json(PAPER_NONCE_FILE) or {}
+        n = max(int(eth_call(cfg["paperStaking"], _sel("nonces(address)") + owner_word)[:64], 16),
+                int(last.get(owner, 0)) + 1)
+        for n in range(n, n + 8):
+            used = eth_call(cfg["paperStaking"], _sel("isNonceUsed(address,uint256)") + owner_word + "%064x" % n)
+            if int(used[:64], 16) == 0:
+                _write_private(PAPER_NONCE_FILE, {**last, owner: str(n)})
+                return n
+    raise Refused("PAPER staking has no free nonce near this account's last one; nothing was built")
 
 
 def register_reading(message):
@@ -628,14 +718,159 @@ def register_reading(message):
             "Lasts until": _utc_date(message["expiry"])}
 
 
+def _usdc_text(micro):
+    """Every digit of a USDC amount: `:g` keeps six, so 12,345.67 read as 12345.7 on a card."""
+    return f"{micro / USDC:,.6f}".rstrip("0").rstrip(".")
+
+
 def withdraw_reading(fee):
     def build(message):
-        rows = {"Withdraws": f"{message['amount'] / USDC:g} USDC from Papertrade",
+        rows = {"Withdraws": f"{_usdc_text(int(message['amount']))} USDC from Papertrade",
                 "Goes to": "your own Hyperliquid account"}
         if fee:
             rows["Fee"] = f"{fee:g} USDC, once, to open your Hyperliquid account"
         return rows
     return build
+
+
+# ---- PAPER staking ------------------------------------------------------------------
+
+def _paper(raw):
+    return raw // 10 ** 12 / 10 ** 6
+
+
+def _paper_text(raw):
+    """In integers: PAPER's supply runs to billions, past where a float keeps six decimals,
+    and a card must say exactly what is signed (to six decimals, rounded down)."""
+    whole, frac = divmod(raw // 10 ** 12, 10 ** 6)
+    return f"{whole:,}" + (f".{frac:06d}".rstrip("0") if frac else "")
+
+
+def _usd_down(raw):
+    """Rewards carry 18 decimals; rounded down, a figure said to the owner is never more than a claim pays."""
+    return raw // (WAD // USDC) / USDC
+
+
+def _usd_text(usd):
+    return f"{usd:,.2f}" if usd >= 0.01 else f"{usd:g}"
+
+
+def paper_state(owner, cfg=None):
+    cfg = cfg or config()
+    if not cfg.get("paperStaking"):
+        raise Refused(cfg.get("paperProblem") or "PAPER staking is not configured")
+    owner_word = _word("address", owner).hex()
+
+    def read(to, sig):
+        return int(eth_call(to, _sel(sig) + owner_word)[:64], 16)
+    return {"balance": read(cfg["paperToken"], "balanceOf(address)"),
+            "staked": read(cfg["paperStaking"], "stakedBalance(address)"),
+            "pending": read(cfg["paperStaking"], "pendingReward(address)")}
+
+
+def _staking_rules():
+    """Papertrade's intake controls: [revision, minimum stake (18 decimals), paused actions]."""
+    controls = api_get("/state/trading").get("intakeControls") or []
+    minimum = int(controls[1]) if len(controls) > 1 else 0
+    paused = set(controls[2]) if len(controls) > 2 and isinstance(controls[2], list) else set()
+    return minimum, paused
+
+
+def _staking_notes(p, minimum, paused):
+    """What stops each staking action now, as the sentence to say; None when it can run.
+    The checks Papertrade makes itself, so a card is never filed only to be refused."""
+    if "paperStake" in paused:
+        stake = "Papertrade has paused staking for now."
+    elif not p["balance"]:
+        stake = ("Your wallet holds no PAPER to stake. Papertrade mints PAPER to you when you close "
+                 "a trade at a loss or are liquidated.")
+    elif p["balance"] < minimum:
+        stake = (f"Papertrade's minimum stake is {_paper_text(minimum)} PAPER, and your wallet holds "
+                 f"{_paper_text(p['balance'])} PAPER.")
+    else:
+        stake = None
+    if "paperUnstake" in paused:
+        unstake = "Papertrade has paused unstaking for now."
+    else:
+        unstake = None if p["staked"] else "You have no PAPER staked."
+    if "paperClaim" in paused:
+        claim = "Papertrade has paused reward claims for now."
+    elif _usd_down(p["pending"]) <= 0:
+        claim = ("You have no staking rewards to claim yet. They arrive as Papertrade distributes "
+                 "trading fees to stakers, which it does by itself.")
+    else:
+        claim = None
+    return {"Stake": stake, "Unstake": unstake, "Claim": claim}
+
+
+def staking(owner):
+    cfg = config()
+    p = paper_state(owner, cfg)
+    total = int(eth_call(cfg["paperStaking"], _sel("totalStaked()"))[:64], 16)
+    minimum, paused = _staking_rules()
+    notes = _staking_notes(p, minimum, paused)
+    return {"paperBalance": _paper(p["balance"]), "stakedPaper": _paper(p["staked"]),
+            "rewardsUsd": _usd_down(p["pending"]),
+            "shareOfStakedPct": round(p["staked"] * 100 / total, 4) if total else 0,
+            "minimumStakePaper": _paper(minimum),
+            "stakeNote": notes["Stake"], "unstakeNote": notes["Unstake"], "claimNote": notes["Claim"]}
+
+
+def _paper_amount(text, held):
+    if text.strip().lower() == "all":
+        return held
+    try:
+        amount = Decimal(text.replace(",", ""))
+    except InvalidOperation:
+        amount = None
+    if amount is None or not amount.is_finite() or amount <= 0:
+        raise Refused("--amount takes a PAPER amount, or all")
+    return int(amount * WAD)
+
+
+def stake_reading(message):
+    return {"Stakes": f"{_paper_text(int(message['amount']))} PAPER from your wallet",
+            "Earns": "a share of Papertrade's trading fees, paid in USDC",
+            "Unstaking": "any time, with no lockup, after another approval"}
+
+
+def unstake_reading(message):
+    return {"Unstakes": f"{_paper_text(int(message['amount']))} PAPER back to your wallet",
+            "Rewards": "USDC already earned stays yours to claim",
+            "Stops": "this PAPER earning further rewards"}
+
+
+def claim_reading(about):
+    def build(message):
+        return {"Claims": f"your PAPER staking rewards, about {_usd_text(about)} USDC now",
+                "Goes to": "your Papertrade balance, from where it can be withdrawn"}
+    return build
+
+
+def paper_typed(owner, primary, amount_text=None):
+    """Every check Papertrade makes, then the owner card for a stake, an unstake or a claim."""
+    cfg = config()
+    p = paper_state(owner, cfg)
+    minimum, paused = _staking_rules()
+    note = _staking_notes(p, minimum, paused)[primary]
+    if note:
+        raise Refused(note)
+    if primary == "Claim":
+        about = _usd_down(p["pending"])
+        return owner_typed(owner, "Claim", {}, claim_reading(about),
+                           f"Claim about {_usd_text(about)} USDC of PAPER staking rewards into your Papertrade balance")
+    held = p["balance"] if primary == "Stake" else p["staked"]
+    amount = _paper_amount(amount_text, held)
+    if amount > held:
+        where = "is in your wallet" if primary == "Stake" else "is staked"
+        raise Refused(f"only {_paper_text(held)} PAPER {where}")
+    if primary == "Stake":
+        if amount < minimum:
+            raise Refused(f"Papertrade's minimum stake is {_paper_text(minimum)} PAPER")
+        return owner_typed(owner, "Stake", {"amount": amount}, stake_reading,
+                           f"Stake {_paper_text(amount)} PAPER on Papertrade to earn a share of its fees in USDC")
+    return owner_typed(owner, "Unstake", {"amount": amount}, unstake_reading,
+                       f"Unstake {_paper_text(amount)} PAPER on Papertrade back to your wallet")
 
 
 def owner_body(owner, primary, signature, action, extras=None):
@@ -649,7 +884,7 @@ def owner_body(owner, primary, signature, action, extras=None):
     if int(msg["deadline"]) <= _now():
         raise Refused("the signed request expired (1 hour); build it again and get a new signature")
     v, r, s = split_signature(signature)
-    digest = digest_of(cfg["exchange"], primary, {**msg, "positionIds": msg.get("positionIds", [])} if primary == "Close" else msg)
+    digest = digest_of(cfg, primary, {**msg, "positionIds": msg.get("positionIds", [])} if primary == "Close" else msg)
     signer = recover(digest, v, r, s)
     if signer != owner:
         raise Refused(f"the signature is from {signer}, not the owner; nothing was sent")
@@ -670,7 +905,7 @@ def session_body(owner, primary, action, extra):
         raise Refused("the session key is not registered or has expired: the owner must approve a "
                       "registration card first (register-typed-data); nothing was built")
     message = {"user": owner, **extra, "nonce": _take_nonce(owner), "deadline": _now() + DEADLINE}
-    digest = digest_of(cfg["exchange"], primary, message)
+    digest = digest_of(cfg, primary, message)
     sig = sign_digest(int(k["privateKey"], 16), digest)
     body_file = _scratch("body", {"action": action, "signed": {**wire(primary, message), **sig}})
     return {"bodyFile": body_file, "action": action, "intentId": intent_id(digest, k["address"]),
@@ -784,6 +1019,11 @@ def account(owner):
     # dust more than the balance holds, and Papertrade refuses it as `funding`.
     available_micro = balance // (WAD // USDC)
     available = available_micro / USDC
+    try:
+        p = paper_state(owner, cfg)
+        paper = {"balance": _paper(p["balance"]), "staked": _paper(p["staked"]), "rewardsUsd": _usd_down(p["pending"])}
+    except Refused:
+        paper = None
     return {
         "owner": owner, "availableUsd": available, "positions": positions,
         "depositAddress": deposit["depositAddress"], "pendingDepositUsd": deposit["pendingUsd"],
@@ -791,6 +1031,7 @@ def account(owner):
         "withdrawActivationFeeUsd": fee, "minWithdrawUsd": 10,
         "maxWithdrawUsd": max(0, available_micro - fee * USDC) / USDC,
         "withdrawNote": _withdraw_note(available, fee),
+        "paper": paper,
         "sessionKey": key_status(owner, funded=True if available > 0 or positions else None),
     }
 
@@ -816,7 +1057,8 @@ def _pages(owner, kind, limit):
     """Papertrade's own history routes, newest first, 75 a page."""
     items, cursor = [], None
     while len(items) < limit:
-        query = {"limit": "75", **({"cursor": cursor} if cursor else {})}
+        # Papertrade answers 400 unless the query is in its canonical order: cursor, then limit.
+        query = {**({"cursor": cursor} if cursor else {}), "limit": "75"}
         reply = api_get(f"/query/accounts/{owner}/{kind}?{urllib.parse.urlencode(query)}")
         items += reply.get("items", [])
         nxt = reply.get("nextCursor")
@@ -939,7 +1181,9 @@ def quote(owner, market, side, margin, leverage):
 
 # Each needs the owner: a key, an owner card, or the path a duty is filed with.
 OWNER_ONLY = {"key-new", "register-typed-data", "register-body", "withdraw-typed-data", "withdraw-body",
-              "duty-helper"}
+              "duty-helper", "stake-typed-data", "stake-body", "unstake-typed-data", "unstake-body",
+              "claim-typed-data", "claim-body"}
+PAPER_COMMANDS = {"stake": "Stake", "unstake": "Unstake", "claim": "Claim"}
 
 
 def _refresh_duty_copy():
@@ -979,12 +1223,16 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("config").add_argument("--refresh", action="store_true")
     sub.add_parser("markets")
-    for name in ("account", "key-status", "register-typed-data"):
+    for name in ("account", "key-status", "register-typed-data", "staking", "claim-typed-data"):
         sub.add_parser(name).add_argument("--owner", required=True)
     kn = sub.add_parser("key-new")
     kn.add_argument("--owner", required=True)
     kn.add_argument("--rotate", action="store_true")
-    for name in ("register-body", "withdraw-body"):
+    for name in ("stake-typed-data", "unstake-typed-data"):
+        st = sub.add_parser(name)
+        st.add_argument("--owner", required=True)
+        st.add_argument("--amount", required=True, help="PAPER, or all")
+    for name in ("register-body", "withdraw-body", "stake-body", "unstake-body", "claim-body"):
         b = sub.add_parser(name)
         b.add_argument("--owner", required=True)
         b.add_argument("--signature", required=True)
@@ -1052,9 +1300,18 @@ def main(argv):
                           f"is available" + (f", and the first withdrawal pays a one-time {fee:g} USDC "
                                              f"activation fee on top" if fee else ""))
         return owner_typed(owner, "WithdrawToCore", {"amount": amount},
-                           withdraw_reading(acct["withdrawActivationFeeUsd"]))
+                           withdraw_reading(acct["withdrawActivationFeeUsd"]),
+                           f"Withdraw {_usdc_text(amount)} USDC from Papertrade to your Hyperliquid account")
     if a.cmd == "withdraw-body":
         return owner_body(owner, "WithdrawToCore", a.signature, "withdrawToCore", {"withdrawal": {"route": "hypercore"}})
+    if a.cmd == "staking":
+        return staking(owner)
+    op, _, step = a.cmd.partition("-")
+    if op in PAPER_COMMANDS and step == "typed-data":
+        return paper_typed(owner, PAPER_COMMANDS[op], getattr(a, "amount", None))
+    if op in PAPER_COMMANDS and step == "body":
+        primary = PAPER_COMMANDS[op]
+        return owner_body(owner, primary, a.signature, PAPER_TYPES[primary])
     if a.cmd == "deposit-plan":
         return deposit_plan(owner, a.amount)
     if a.cmd == "history":

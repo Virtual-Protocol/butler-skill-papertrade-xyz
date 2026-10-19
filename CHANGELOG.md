@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.2.0
+
+- **PAPER staking.** Stake PAPER, unstake it, and claim its USDC rewards into the
+  Papertrade balance (`references/staking.md`). Each is the owner's signature through an
+  approval card, signed under PaperStaking's own EIP-712 domain: Papertrade lets no
+  session key sign them. `staking` reads the wallet's PAPER, the stake, the rewards and
+  the minimum stake, and says in `stakeNote`, `unstakeNote` or `claimNote` why an action
+  cannot run, so no card is filed only to be refused. `account` shows the same figures in
+  `paper`. Measured against Papertrade from a wallet with no
+  PAPER: each request reached its balance check (`paperBalance`, `stakedBalance`,
+  `noRewards`, `below_minimum_paper_stake`), and one signed under the wrong domain was
+  refused as `unauthorized_intent`.
+- **One step for owner cards.** Step 8 now covers a withdrawal and the three staking
+  actions alike: `<OP>-typed-data`, the card, `<OP>-body`. The helper prints each card's
+  `purpose`, the withdrawal's included, so the model never types an amount into it.
+- **A withdrawal card shows every digit.** Its reading printed the amount with six
+  significant digits, so 12,345.67 USDC read as 12345.7.
+- **Staking never stops trading.** PaperStaking's address is checked on-chain like the
+  Exchange's. If that fails, only the staking commands refuse; opens and closes go on.
+- **Its own nonces.** PaperStaking does not share the session key's nonces; the helper
+  takes the contract's next unused one, and never hands the same one out twice.
+- **Rewards are not promised.** `references/staking.md` says when rewards dry up: the
+  pool's overflow reaches stakers only while it is above its cap, which Papertrade can
+  change, and no fees reach them while winners are queued. No APR, no cap figure.
+- **`history` past 75 trades works.** Papertrade answers 400 unless the cursor comes
+  before `limit` in the query, so every second page failed; `cashflows` too.
+
 ## 1.1.0
 
 - **From a duty:** a duty reads the account and closes (or opens) with the same session

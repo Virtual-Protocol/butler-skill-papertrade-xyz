@@ -8,7 +8,7 @@
   session key sign them. `staking` reads the wallet's PAPER, the stake, the rewards and
   the minimum stake, and says in `stakeNote`, `unstakeNote` or `claimNote` why an action
   cannot run, so no card is filed only to be refused. `account` shows the same figures in
-  `paper`. Measured against Papertrade from a wallet with no
+  `paper`, which answers "how much PAPER do I have". Measured against Papertrade from a wallet with no
   PAPER: each request reached its balance check (`paperBalance`, `stakedBalance`,
   `noRewards`, `below_minimum_paper_stake`), and one signed under the wrong domain was
   refused as `unauthorized_intent`.

@@ -2,7 +2,7 @@
 name: papertrade-xyz
 description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, withdraw, and stake PAPER - with a session key Butler keeps.
 version: 1.2.0
-metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade","stake paper","unstake paper","paper staking","claim paper rewards"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
+metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade","stake paper","unstake paper","paper staking","claim paper rewards","my paper","paper balance","how much paper"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
 ---
 
 ## When to use
@@ -10,7 +10,7 @@ metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz
 Your owner wants to act on **Papertrade**, a perpetuals exchange on Hyperliquid's HyperEVM
 where every trade faces Papertrade's own pool at Hyperliquid's mid price:
 
-- **Look** - "what's my Papertrade balance", "my positions": step 1, then stop.
+- **Look** - "what's my Papertrade balance", "my positions", "my PAPER": step 1, then stop.
 - **History** - "how did my trades do", "my PnL": step 1, then `history`
   (`references/account.md`). Relay its figures; never add them up yourself.
 - **Fund** - "put $50 into Papertrade": step 3.
@@ -203,7 +203,7 @@ Every build prints an `intentId`. When a `201` has not shown up in `account` or
 python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 ```
 
-- `stillQueued: true` - still waiting its turn; say so and read again later.
+- `stillQueued: true` - still waiting; say so and read again later.
 - `false`, and still not in `account` - it did not go through, and nothing moved. Say so.
   An open or a close is built again only if the owner asks again. An owner step needs a
   new card: build it again (`register-typed-data` or `<OP>-typed-data`, never `key-new`)

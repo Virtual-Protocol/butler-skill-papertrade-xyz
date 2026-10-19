@@ -1,15 +1,16 @@
 # Farming PAPER
 
-Papertrade mints PAPER when a position closes at a loss. A farm holds longs and shorts of
-the same size on one market at once, so one side's loss is the other side's gain: the
-losing legs mint PAPER, and the cycle costs what Papertrade keeps back from the winning
-legs. A duty runs the cycles, so the owner fills in one ticket and approves it once:
+Papertrade mints PAPER when a position closes at a loss. A farm holds a long and a short
+of the same size on one market at once, so one side's loss is the other side's gain: the
+losing leg mints PAPER, and the cycle costs what Papertrade keeps back from the winning
+leg. A duty runs the cycles until the owner's budget is spent or they stop it, so they
+fill in one ticket and approve it once:
 
 ```text
-open N longs + N shorts → price moves ±MOVE_PCT → close all → note the cycle → again
+open a long + a short → price moves ±MOVE_PCT → close both → note the cycle → again
 ```
 
-**The cost is what the winning legs give back.** A winning leg is paid back about 10%
+**The cost is what the winning leg gives back.** A winning leg is paid back about 10%
 less than it made (much less on small moves), then Papertrade keeps its win fee (2%
 today) of the rest; a loss costs nothing extra. On BTC a 1% cycle keeps about 86% of the
 win, a 0.3% cycle about 82%. So a cycle costs about $1.36 per $1,000 leg at 1%, and $0.53
@@ -21,19 +22,18 @@ at 0.3%. `farm-quote` works it out; never do the arithmetic yourself.
 first, and if a farm on that market is running (titled "Farm PAPER: <MARKET> ..."), say so
 and show it instead of a new ticket. A second one would take the first one's legs for its
 own. A farm on the other market is fine. Never assume a setting: no leverage, size, move
-or stop is the owner's until they say it. Show the ticket with every field blank, its
+or budget is the owner's until they say it. Show the ticket with every field blank, its
 limits beside it, and this turn's `availableUsd`, and ask them to fill it in:
 
 ```text
 Farm ticket — Papertrade (you have $<availableUsd>)
   Market             ___     BTC or ETH
-  Margin per leg     $___    at least $10, and margin x leverage at least $1,000
-  Pairs per cycle    ___     1 to 6; each pair is a long and a short
+  Margin per leg     $___    at least $10, and margin x leverage at least $1,000;
+                             each cycle holds two legs (a long and a short)
   Leverage           ___x    the losing leg is wiped out at about a (100 / leverage)% move
   Move per cycle     ±___%   both legs close once price moves this far, either way
-  Trigger stop       $___    stop, and close everything, under this balance
-  Hour limit         ___     stop after this many hours
-  Max cycles         ___     a number, or "no limit"
+  Budget             $___    the most the farm may lose; it runs until this is spent
+                             or they say "stop farming"
 ```
 
 Ask again for only the fields still blank, showing what they have filled.
@@ -43,8 +43,7 @@ not a list of picks to confirm: the farm opens legs with no one asking, so every
 has to be one they typed. "You pick", "default", "whatever" or "go" is not a value:
 
 > I can't choose these for you: the farm trades on its own once it starts, so each number
-> has to be yours. Still blank: leverage, move per cycle, trigger stop, hour limit, max
-> cycles.
+> has to be yours. Still blank: leverage, move per cycle, budget.
 
 Never suggest a leverage higher than one they named. A field they gave earlier in the conversation
 counts once you repeat it back in the ticket.
@@ -53,7 +52,7 @@ Then quote it. It signs nothing, refuses settings that cannot work (and says whi
 to change), and works out the cycle:
 
 ```sh
-python3 /tmp/papertrade.py farm-quote --owner <OWNER> --market <MARKET> --margin <USD> --leverage <N> --move <PCT> --pairs <N> --stop-below <USD> --hours <H> --max-cycles <N>
+python3 /tmp/papertrade.py farm-quote --owner <OWNER> --market <MARKET> --margin <USD> --leverage <N> --move <PCT> --budget <USD>
 ```
 
 Quote only once every field has their value. A refusal is said as written, and the ticket
@@ -65,10 +64,10 @@ Otherwise say, from its fields only:
 > **{summary}** {breakEven} That is {costPer1kPaperUsd} per 1,000 PAPER. The losing leg pays
 > {losingLegsPayUsd}; the winning leg keeps {winningLegsKeepUsd} ({winningKeepsPct}%).
 >
-> BTC is at {markPrice}; this cycle closes at {exitDownPrice} or {exitUpPrice}. At your
-> stop of {stopBelowUsd}, that is about {cyclesBeforeStop} cycles and {paperBeforeStop}
-> PAPER, unless the hour limit comes first. The farm also stops by itself if BTC moves 1%
-> inside a minute. Start it?
+> BTC is at {markPrice}; this cycle closes at {exitDownPrice} or {exitUpPrice}. Your
+> {budgetUsd} budget is about {cyclesForBudget} cycles and {paperForBudget} PAPER. It runs
+> until that is spent or you say "stop farming", and stops by itself if BTC moves 1%
+> inside a minute. Each cycle holds {cycleHoldsUsd} while it runs. Start it?
 
 Say each of `warnings` after it, word for word. When `paperPerCycle` is null, say the
 summary as written and skip the PAPER figures. Their yes, after you said the bad case, is
@@ -85,17 +84,17 @@ their yes to every leg the farm opens: a duty asks no one before it opens.
    ```
 
 3. Check again that no farm runs on that market. Then file the duty below with a `timer`
-   trigger every 60 seconds, and in `PARAMS`, as numbers: `PAPERTRADE_HELPER` (the `helper` path), `MARKET`, `MARGIN_USD`, `LEVERAGE`,
-   `MOVE_PCT`, `PAIRS`, `STOP_BELOW_USD`, `HOUR_LIMIT` and `MAX_CYCLES` (0 for none),
+   trigger every 60 seconds, and in `PARAMS`, as numbers: `PAPERTRADE_HELPER` (the
+   `helper` path), `MARKET`, `MARGIN_USD`, `LEVERAGE`, `MOVE_PCT` and `BUDGET_USD`,
    exactly as quoted. Title it after the ticket, such as "Farm PAPER: BTC $10 x 100x
-   ±0.5%".
+   ±0.5%, $8 budget".
 4. Tell them it is running, that each cycle lands in its thread with what it cost and
    minted, and that "stop farming" ends it.
 
 ## While it runs
 
-- **"How's my farm?"** Read the duty's status and log, then `history`. The log has one
-  `cycle` line per closed cycle with its PnL and PAPER.
+- **"How's my farm?"** Read the duty's status and log, then `history`. The status has the
+  budget spent so far; the log has one `cycle` line per closed cycle with its PnL and PAPER.
 - **"Stop farming."** Pause the duty first, so it opens nothing more, then read `account`.
   The farm's legs are the positions on its `MARKET` at its `MARGIN_USD` and `LEVERAGE`:
   say their PnL before fees and close them all in one `close --ids` (`SKILL.md` step 7).
@@ -107,11 +106,12 @@ their yes to every leg the farm opens: a duty asks no one before it opens.
 
 Each minute it reads `account`, then:
 
-- **Stops** (closing every farm leg first) at the hour limit, when the balance (available
-  plus the farm legs' margin and PnL) is at or under `STOP_BELOW_USD`, or when the price
-  moved 1% or more since the last minute. With nothing open it also stops at
-  `MAX_CYCLES`, or when a cycle no longer fits in `availableUsd`.
-- **Opens** a cycle when none is open: `PAIRS` longs, then `PAIRS` shorts.
+- **Stops** (closing every farm leg first) when the price moved 1% or more since the
+  last minute. With nothing open it also stops once its closed cycles have lost
+  `BUDGET_USD` in all, or when a cycle no longer fits in `availableUsd`. It checks the
+  budget between cycles, so the last cycle can take it a little past; a wiped-out leg,
+  up to that leg's margin past.
+- **Opens** a cycle when none is open: a long, then a short.
 - **Just opened:** waits for all the legs. Some missing after two minutes means Papertrade
   took only part of it: it closes what did open and tries a fresh cycle; three in a row
   and it stops.
@@ -139,10 +139,7 @@ MARKET = PARAMS["MARKET"]
 MARGIN = float(PARAMS["MARGIN_USD"])
 LEVERAGE = int(PARAMS["LEVERAGE"])
 MOVE = float(PARAMS["MOVE_PCT"]) / 100
-PAIRS = int(PARAMS["PAIRS"])
-STOP_BELOW = float(PARAMS["STOP_BELOW_USD"])
-HOUR_LIMIT = float(PARAMS["HOUR_LIMIT"])
-MAX_CYCLES = int(PARAMS.get("MAX_CYCLES") or 0)
+BUDGET = float(PARAMS["BUDGET_USD"])
 WAIT = 120
 SPIKE = 0.01
 
@@ -197,7 +194,7 @@ def totals():
 def finish(reason):
     cycles, pnl, paper = totals()
     bevo.done(f"Farm stopped: {reason}. {cycles} cycle{'' if cycles == 1 else 's'}, {paper:,.0f} PAPER minted, "
-              f"{pnl:+.2f} USD after fees.")
+              f"{max(0.0, -pnl):,.2f} of your {BUDGET:,.2f} USD budget spent.")
 
 
 def report(ids):
@@ -232,8 +229,6 @@ def stop_with(reason, open_ids):
 
 
 owner = bevo.read("/me")["user"]["agentWalletAddress"]
-if "started_at" not in bevo.state:
-    bevo.state["started_at"] = time.time()
 for tick in bevo.ticks():
     acct = helper("account", "--owner", owner)
     if acct is None:
@@ -255,22 +250,13 @@ for tick in bevo.ticks():
         mine += [p["id"] for p in acct["positions"] if p["id"] not in set(bevo.state["opening"])
                  and p["market"] == MARKET and p["leverage"] == LEVERAGE]
 
-    # Limits that stop the farm even mid-cycle: they close every farm leg first.
+    # A price spike stops the farm even mid-cycle: it closes every farm leg first.
     if not bevo.state.get("stop"):
-        balance = acct["availableUsd"] + sum(open_by_id[i]["marginUsd"] + (open_by_id[i]["pnlUsdBeforeFees"] or 0)
-                                             for i in mine)
         marks = [open_by_id[i]["markPrice"] for i in mine if open_by_id[i]["markPrice"]]
         last = bevo.state.get("last_mark")
-        reason = None
-        if time.time() - bevo.state["started_at"] >= HOUR_LIMIT * 3600:
-            reason = f"the {HOUR_LIMIT:g}-hour limit was reached"
-        elif balance <= STOP_BELOW:
-            reason = f"the balance is {balance:,.2f} USD, at or under your stop of {STOP_BELOW:,.2f}"
-        elif marks and last and abs(marks[0] - last) / last >= SPIKE:
-            reason = f"{MARKET} moved 1% or more inside a minute (safety stop)"
         bevo.state["last_mark"] = marks[0] if marks else None
-        if reason:
-            stop_with(reason, mine)
+        if marks and last and abs(marks[0] - last) / last >= SPIKE:
+            stop_with(f"{MARKET} moved 1% or more inside a minute (safety stop)", mine)
             continue
 
     # A cycle is closing: count it once its legs are gone.
@@ -296,16 +282,16 @@ for tick in bevo.ticks():
         before = set(bevo.state["opening"])
         new = [p["id"] for p in acct["positions"]
                if p["id"] not in before and p["market"] == MARKET and p["leverage"] == LEVERAGE]
-        if len(new) >= 2 * PAIRS:
+        if len(new) >= 2:
             bevo.state.pop("opening")
-            bevo.state["legs"] = new[:2 * PAIRS]
+            bevo.state["legs"] = new[:2]
             bevo.state["one_sided"] = 0
             bevo.log(f"cycle {cycles + 1} open: {', '.join(new)}")
         elif waited >= WAIT:
             bevo.state.pop("opening")
             one_sided = bevo.state.get("one_sided", 0) + 1
             bevo.state["one_sided"] = one_sided
-            bevo.log(f"only {len(new)} of {2 * PAIRS} legs opened ({one_sided} in a row)")
+            bevo.log(f"only {len(new)} of 2 legs opened ({one_sided} in a row)")
             if one_sided >= 3:
                 stop_with("Papertrade opened only part of a cycle three times in a row", new)
             elif new:
@@ -320,7 +306,8 @@ for tick in bevo.ticks():
         entry = sum(p["entryPrice"] for p in legs) / len(legs) if legs else 0
         mark = next((p["markPrice"] for p in legs if p["markPrice"]), None)
         moved = abs(mark - entry) / entry if mark and entry else 0
-        bevo.status(f"Cycle {cycles + 1} open · {moved * 100:.2f}% of ±{MOVE * 100:.2f}% · {paper:,.0f} PAPER so far")
+        bevo.status(f"Cycle {cycles + 1} open · {moved * 100:.2f}% of ±{MOVE * 100:.2f}% · {paper:,.0f} PAPER, "
+                    f"{max(0.0, -pnl):,.2f} of {BUDGET:,.2f} USD spent")
         if len(legs) == len(ids) and moved < MOVE:
             continue
         if legs and not close([p["id"] for p in legs], "move" if len(legs) == len(ids) else "a leg was wiped out"):
@@ -329,22 +316,22 @@ for tick in bevo.ticks():
         bevo.state["closing"] = ids
         continue
 
-    # Nothing open: stop at a limit, or open the next cycle.
-    if MAX_CYCLES and cycles >= MAX_CYCLES:
-        finish(f"it ran the {MAX_CYCLES} cycles you set")
-    if acct["availableUsd"] < 2 * PAIRS * MARGIN:
-        finish(f"{acct['availableUsd']:,.2f} USD is left, under the {2 * PAIRS * MARGIN:,.2f} a cycle holds")
+    # Nothing open: stop once the budget is spent, or open the next cycle.
+    if -pnl >= BUDGET:
+        finish(f"your {BUDGET:,.2f} USD budget is spent")
+    if acct["availableUsd"] < 2 * MARGIN:
+        finish(f"{acct['availableUsd']:,.2f} USD is left, under the {2 * MARGIN:,.2f} a cycle holds")
     if waited < WAIT:
         continue
     bevo.state["opening"] = list(open_by_id)
     bevo.state["sent_at"] = time.time()
     base = ["--owner", owner, "--market", MARKET, "--margin", str(MARGIN), "--leverage", str(LEVERAGE)]
-    for side in ["long"] * PAIRS + ["short"] * PAIRS:
+    for side in ("long", "short"):
         if not request(f"open {side}", "open", *base, "--side", side):
             bevo.log(f"{side} refused; the rest are closed once they show")
             break
     bevo.status(f"Opening cycle {cycles + 1} · {paper:,.0f} PAPER so far")
 ```
 
-Its settings: `PAPERTRADE_HELPER`, `MARKET`, `MARGIN_USD`, `LEVERAGE`, `MOVE_PCT`, `PAIRS`,
-`STOP_BELOW_USD`, `HOUR_LIMIT` and `MAX_CYCLES`.
+Its settings: `PAPERTRADE_HELPER`, `MARKET`, `MARGIN_USD`, `LEVERAGE`, `MOVE_PCT` and
+`BUDGET_USD`.

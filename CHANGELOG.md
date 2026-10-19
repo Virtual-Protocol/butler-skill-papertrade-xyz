@@ -6,13 +6,13 @@
   farm on that market instead of a new ticket; a second would take the first one's legs.
 - `farm-quote` returns `breakEven` and `breakEvenUsdPerPaper`: the PAPER price the cycle
   only pays off above, said with "it buys PAPER with fees; it is not a return".
-- **Farm PAPER, from a ticket.** "I want to farm PAPER" shows the owner a blank ticket, the
-  fields of Papergainz' farm page: market, margin per leg, pairs per cycle (1 to 6),
-  leverage, move per cycle, trigger stop, hour limit and max cycles. Nothing is assumed:
-  the owner fills in every field, and the farm duty is filed only after that.
-  `farm-quote` then says what one cycle costs and mints ("Each cycle costs $0.77 for 54
-  PAPER"), the cost per 1,000 PAPER, how many cycles fit before the stop, and the bad case
-  in dollars, before anything is filed (`references/farm.md`).
+- **Farm PAPER, from a ticket.** "I want to farm PAPER" shows the owner a blank ticket of
+  five fields: market, margin per leg, leverage, move per cycle and budget. Nothing is
+  assumed, even when the owner asks the Butler to pick: they fill in every field, and the
+  farm duty is filed only after that. `farm-quote` then says what one cycle costs and
+  mints ("Each cycle costs $0.77 for 54 PAPER"), the cost per 1,000 PAPER, about how many
+  cycles and how much PAPER the budget buys, and the bad case in dollars, before anything
+  is filed (`references/farm.md`).
 - **The cost is what the winning legs give back.** A winning leg is paid back about 10%
   less than it made (less still on small moves), then Papertrade's win fee (2% today, read
   live; `markets` now reports it as `winFeeRate`) comes off the rest; a loss costs nothing
@@ -20,16 +20,16 @@
   cycle ($47,399.20 for 4,290,739 PAPER) to within rounding, plus the win fee that model
   leaves out. PAPER per $1 lost is read from the
   owner's own losing closes; with none yet it is unknown, never guessed.
-- **The farm duty** opens `PAIRS` longs and shorts, closes them all once price is
-  `MOVE_PCT` from their average entry, notes each cycle in its thread without a push, and
-  repeats. It closes every farm leg and stops at the hour limit, at the trigger stop, or
-  when price moves 1% inside a minute; with nothing open it also stops at max cycles or
-  when a cycle no longer fits. It never touches a position it did not open, closes the
+- **The farm duty** opens a long and a short, closes both once price is `MOVE_PCT` from
+  their average entry, notes each cycle in its thread without a push, and repeats until
+  the owner says "stop farming" or its closed cycles have lost `BUDGET_USD`. It closes
+  every farm leg and stops when price moves 1% inside a minute, and stops between cycles
+  once the budget is spent or a cycle no longer fits. It never touches a position it did not open, closes the
   rest at once when a leg is wiped out, closes a part-opened cycle (three in a row and it
   stops), and retries a refused close every minute rather than giving up.
 - **Measured:** a $1,000 BTC long closed at -0.22% lost $2.24, paid no fee and minted
   24.08 PAPER (about 10.95 per $1, after Papertrade's 2% carve). The duty is tested
-  against a simulated Papertrade in ten cases.
+  against a simulated Papertrade in eight cases.
 
 ## 1.1.0
 

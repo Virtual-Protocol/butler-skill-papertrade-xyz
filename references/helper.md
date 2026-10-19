@@ -67,7 +67,7 @@ match. A failure there means Papertrade changed its contracts; stop.
 | `history` | closed positions, newest first, with `pnlUsd` and `pnlPct` as Papertrade's app computes them (adjusted PnL less the fee; a liquidation is minus the margin), and a `summary` (`references/account.md`) |
 | `cashflows` | deposits and withdrawals with their `status`; a withdrawal is done at `settled` |
 | `intents` | Papertrade's queue for the owner; with `--intent`, `stillQueued` for one request. Neither queued nor in `account` means it did not go through |
-| `farm-quote` | the farm ticket, signing nothing: one cycle's `costPerCycleUsd` (the winning legs' haircut and Papertrade's win fee) and `paperPerCycle` (PAPER per $1 lost is read from the owner's own losing closes; `null` until there is one), `costPer1kPaperUsd`, `breakEvenUsdPerPaper`, `cyclesBeforeStop`, `wipedOutAtMovePct`, `safeLeverage`, exit prices, and `summary`, `breakEven`, `badCase` and `warnings` to say (`references/farm.md`). Refuses settings that cannot work |
+| `farm-quote` | the farm ticket, signing nothing: one cycle's `costPerCycleUsd` (the winning legs' haircut and Papertrade's win fee) and `paperPerCycle` (PAPER per $1 lost is read from the owner's own losing closes; `null` until there is one), `costPer1kPaperUsd`, `breakEvenUsdPerPaper`, `cyclesForBudget`, `paperForBudget`, `wipedOutAtMovePct`, `safeLeverage`, exit prices, and `summary`, `breakEven`, `badCase` and `warnings` to say (`references/farm.md`). Refuses settings that cannot work |
 | `withdraw-typed-data` / `withdraw-body` | the owner's signature for a withdrawal to their Hyperliquid account |
 
 A duty may run every command except `key-new`, `duty-helper` and the owner steps, which each need the owner and are refused there.
@@ -953,7 +953,6 @@ FARM_DEADBAND = 2e-5
 FARM_MINT_SHARE = 0.98
 FARM_MAINTENANCE = 5e-4      # a leg is wiped out this far before 1/leverage
 FARM_QUEUE_ROOM = 3e-3       # room past the exit for a close waiting in Papertrade's queue
-FARM_MAX_PAIRS = 6           # a close takes at most 12 ids
 
 
 def _farm_wipeout(leverage):
@@ -970,9 +969,9 @@ def _farm_paper_rate(owner):
     return round(minted / (lost * FARM_MINT_SHARE), 2) if lost > 0 else None
 
 
-def farm_quote(owner, market, margin, leverage, move_pct, pairs, stop_below, hours, max_cycles):
-    """The farm ticket: what one cycle costs and mints at these settings, and when it stops.
-    Signs nothing."""
+def farm_quote(owner, market, margin, leverage, move_pct, budget):
+    """The farm ticket: what one cycle (a long and a short) costs and mints at these settings,
+    and how many cycles the budget buys. Signs nothing."""
     mk = markets()
     m = next((x for x in mk["markets"] if x["symbol"].upper() == market.upper()), None)
     if not m or m["symbol"] not in FARM_KNEE:
@@ -982,8 +981,6 @@ def farm_quote(owner, market, margin, leverage, move_pct, pairs, stop_below, hou
     move = move_pct / 100
     if not 0.0005 <= move <= 0.1:
         raise Refused("the move per cycle must be 0.05% to 10%")
-    if not 1 <= pairs <= FARM_MAX_PAIRS:
-        raise Refused(f"pairs per cycle must be 1 to {FARM_MAX_PAIRS}")
     if margin < mk["minMarginUsd"]:
         raise Refused(f"margin per leg must be at least ${mk['minMarginUsd']:g}")
     if not 1 <= leverage <= min(m["maxLeverage"], 1000):
@@ -1001,26 +998,22 @@ def farm_quote(owner, market, margin, leverage, move_pct, pairs, stop_below, hou
                       f"{move_pct:g}% exit: lower the leverage to {int(1 / (move + FARM_MAINTENANCE))}x or less")
     acct = account(owner)
     available = acct["availableUsd"]
-    uses = 2 * pairs * margin
+    uses = 2 * margin
     if uses > available + 1e-9:
-        raise Refused(f"a cycle holds ${uses:,.2f} ({2 * pairs} legs x ${margin:g}); ${available:,.2f} is available")
-    if stop_below >= available:
-        raise Refused(f"the stop (${stop_below:,.2f}) must be under the ${available:,.2f} available")
-    if hours <= 0 or max_cycles < 0:
-        raise Refused("the hour limit must be above 0, and max cycles 0 (no limit) or more")
+        raise Refused(f"a cycle holds ${uses:,.2f} (2 legs x ${margin:g}); ${available:,.2f} is available")
 
     if mk["winFeeRate"] is None:
         raise Refused("cannot read Papertrade's win fee, so a cycle's cost is unknown")
     knee = FARM_KNEE[m["symbol"]]
     kept = (move - FARM_DEADBAND) * (1 - FARM_BASE_HAIRCUT) / (1 + knee / move) * (1 - mk["winFeeRate"])
-    loss, gain = move * notional * pairs, kept * notional * pairs
+    loss, gain = move * notional, kept * notional
     cost = loss - gain
+    if budget < cost:
+        raise Refused(f"a budget of ${budget:,.2f} is less than one cycle (${cost:,.2f})")
     rate = _farm_paper_rate(owner)
     paper = loss * FARM_MINT_SHARE * rate if rate else None
     safe = int(1 / (move + FARM_MAINTENANCE + FARM_QUEUE_ROOM))
-    cycles = int((available - stop_below) // cost) if cost > 0 else None
-    if max_cycles and cycles is not None:
-        cycles = min(cycles, max_cycles)
+    cycles = int(budget // cost)
     mid = float(_mids().get(m["symbol"], 0) or 0)
     money = lambda x: f"${x:,.2f}"
     warnings = []
@@ -1033,15 +1026,15 @@ def farm_quote(owner, market, margin, leverage, move_pct, pairs, stop_below, hou
         warnings.append("PAPER per cycle is unknown until this account has closed a losing position: "
                         "Papertrade does not publish its mint rate.")
     return {
-        "market": m["symbol"], "marginPerLegUsd": margin, "leverage": leverage, "pairsPerCycle": pairs,
-        "movePct": move_pct, "stopBelowUsd": stop_below, "hourLimit": hours, "maxCycles": max_cycles,
+        "market": m["symbol"], "marginPerLegUsd": margin, "leverage": leverage, "movePct": move_pct,
+        "budgetUsd": budget,
         "notionalPerLegUsd": round(notional, 2), "cycleHoldsUsd": round(uses, 2),
         "losingLegsPayUsd": round(loss, 2), "winningLegsKeepUsd": round(gain, 2),
         "winningKeepsPct": round(gain / loss * 100, 1), "winFeePct": round(mk["winFeeRate"] * 100, 2),
         "costPerCycleUsd": round(cost, 2), "paperPerCycle": round(paper) if paper else None,
         "paperPerUsdLost": rate, "costPer1kPaperUsd": round(cost / paper * 1000, 2) if paper else None,
-        "availableUsd": available, "cyclesBeforeStop": cycles,
-        "paperBeforeStop": round(paper * cycles) if paper and cycles is not None else None,
+        "availableUsd": available, "cyclesForBudget": cycles,
+        "paperForBudget": round(paper * cycles) if paper else None,
         "markPrice": mid or None,
         "exitUpPrice": round(mid * (1 + move), 2) if mid else None,
         "exitDownPrice": round(mid * (1 - move), 2) if mid else None,
@@ -1054,8 +1047,8 @@ def farm_quote(owner, market, margin, leverage, move_pct, pairs, stop_below, hou
                       if paper else
                       "This buys PAPER with fees; it is not a return, and I can't tell you what PAPER is worth."),
         "badCase": (f"If {m['symbol']} moves more than {wipeout * 100:.2f}% before a close goes through, the losing "
-                    f"leg{'s are' if pairs > 1 else ' is'} wiped out: up to {money(pairs * margin)} that cycle "
-                    f"instead of {money(cost)}."),
+                    f"leg is wiped out: up to {money(margin)} that cycle instead of {money(cost)}, even past "
+                    f"your budget."),
         "warnings": warnings,
     }
 
@@ -1139,10 +1132,7 @@ def main(argv):
     fq.add_argument("--margin", required=True, type=float, help="USD of margin per leg")
     fq.add_argument("--leverage", required=True, type=int)
     fq.add_argument("--move", required=True, type=float, help="percent; both legs close at +/- this")
-    fq.add_argument("--pairs", type=int, default=1, help=f"pairs per cycle, 1 to {FARM_MAX_PAIRS}")
-    fq.add_argument("--stop-below", required=True, type=float, help="USD; the farm stops under this balance")
-    fq.add_argument("--hours", required=True, type=float, help="the farm stops after this many hours")
-    fq.add_argument("--max-cycles", type=int, default=0, help="0 for no limit")
+    fq.add_argument("--budget", required=True, type=float, help="USD; the farm stops once it has lost this much")
     c = sub.add_parser("close")
     c.add_argument("--owner", required=True)
     c.add_argument("--ids", required=True, help="comma-separated position ids, at most 12")
@@ -1198,8 +1188,7 @@ def main(argv):
     if a.cmd == "intents":
         return intents(owner, a.intent)
     if a.cmd == "farm-quote":
-        return farm_quote(owner, a.market, a.margin, a.leverage, a.move, a.pairs, a.stop_below, a.hours,
-                          a.max_cycles)
+        return farm_quote(owner, a.market, a.margin, a.leverage, a.move, a.budget)
     if a.cmd in ("quote", "open"):
         q, m = quote(owner, a.market, a.side, a.margin, a.leverage)
         if a.cmd == "quote":

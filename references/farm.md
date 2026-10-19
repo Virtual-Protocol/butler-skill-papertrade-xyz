@@ -19,7 +19,7 @@ at 0.3%. `farm-quote` works it out; never do the arithmetic yourself.
 ## The ticket
 
 "I want to farm PAPER" means a farm duty. **One farm per market:** read the owner's duties
-first, and if a farm on that market is running (titled "Farm PAPER: <MARKET> ..."), say so
+first, and if a farm on that market is running (titled "Farm PAPER on <MARKET>, ..."), say so
 and show it instead of a new ticket. A second one would take the first one's legs for its
 own. A farm on the other market is fine. Never assume a setting: no leverage, size, move
 or budget is the owner's until they say it. Show the ticket with every field blank, its
@@ -83,11 +83,27 @@ their yes to every leg the farm opens: a duty asks no one before it opens.
    python3 /tmp/papertrade.py duty-helper --owner <OWNER>
    ```
 
-3. Check again that no farm runs on that market. Then file the duty below with a `timer`
-   trigger every 60 seconds, and in `PARAMS`, as numbers: `PAPERTRADE_HELPER` (the
-   `helper` path), `MARKET`, `MARGIN_USD`, `LEVERAGE`, `MOVE_PCT` and `BUDGET_USD`,
-   exactly as quoted. Title it after the ticket, such as "Farm PAPER: BTC $10 x 100x
-   ±0.5%, $8 budget".
+3. Check again that no farm runs on that market. Then file the duty below **exactly as
+   written; never edit its code**. Send:
+   - a `timer` trigger every 60 seconds;
+   - `PARAMS`, as numbers: `PAPERTRADE_HELPER` (the `helper` path), `MARKET`,
+     `MARGIN_USD`, `LEVERAGE`, `MOVE_PCT` and `BUDGET_USD`, exactly as quoted;
+   - the title `Farm PAPER on {MARKET}, ${BUDGET_USD} budget`;
+   - these three, as written:
+
+   ```json
+   {"statusTemplate": {"starting": "Opening the first long and short",
+                       "opening": "Opening cycle {cycle} · {paper} PAPER so far",
+                       "open": "{moved}% of {MOVE_PCT}% · {paper} PAPER · ${spent} spent"},
+    "statusExamples": {"cycle": 3, "moved": 0.21, "paper": 108, "spent": 1.54},
+    "statusPlan": {"watching": "the price move from the pair's entry; both legs close at MOVE_PCT",
+                   "shows": "how far it has moved toward that, PAPER minted so far, and budget spent",
+                   "when": "it checks every minute and closes on the move, so no time is shown",
+                   "confusion": "the % is the price move, not profit; spent is the whole farm's cost"}}
+   ```
+
+   The first try is refused once with a preview of the row: send the same payload again
+   with `statusSeen` set to the token it printed. Change nothing else.
 4. Tell them it is running, that each cycle lands in its thread with what it cost and
    minted, and that "stop farming" ends it.
 
@@ -306,8 +322,7 @@ for tick in bevo.ticks():
         entry = sum(p["entryPrice"] for p in legs) / len(legs) if legs else 0
         mark = next((p["markPrice"] for p in legs if p["markPrice"]), None)
         moved = abs(mark - entry) / entry if mark and entry else 0
-        bevo.status(f"Cycle {cycles + 1} open · {moved * 100:.2f}% of ±{MOVE * 100:.2f}% · {paper:,.0f} PAPER, "
-                    f"{max(0.0, -pnl):,.2f} of {BUDGET:,.2f} USD spent")
+        bevo.status("open", moved=round(moved * 100, 2), paper=round(paper), spent=round(max(0.0, -pnl), 2))
         if len(legs) == len(ids) and moved < MOVE:
             continue
         if legs and not close([p["id"] for p in legs], "move" if len(legs) == len(ids) else "a leg was wiped out"):
@@ -330,7 +345,7 @@ for tick in bevo.ticks():
         if not request(f"open {side}", "open", *base, "--side", side):
             bevo.log(f"{side} refused; the rest are closed once they show")
             break
-    bevo.status(f"Opening cycle {cycles + 1} · {paper:,.0f} PAPER so far")
+    bevo.status("opening", cycle=cycles + 1, paper=round(paper))
 ```
 
 Its settings: `PAPERTRADE_HELPER`, `MARKET`, `MARGIN_USD`, `LEVERAGE`, `MOVE_PCT` and

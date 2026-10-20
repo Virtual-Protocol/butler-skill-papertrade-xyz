@@ -2,6 +2,16 @@
 
 ## 1.3.1
 
+- **The farm files from a template.** Found live: asked to start a farm, a Butler tried
+  four times to file the 226-line farm program by hand and was refused each time
+  (`invalid_payload`: title keys, `statusTemplate`, `statusPlan`/`statusSeen`, a bare
+  `{next}`), so no farm started. The program now ships as the duty template
+  `papertrade-farm@1` (its own repo, listed in butler-skills `templates.json`), and
+  `references/farm.md` files it with a recipe ref, a timer, a title and six settings.
+  The template words its own status line, so there is no status preview to pass.
+- The helper's new `send` posts one `bodyFile` to `/intents` from inside a duty only; a
+  chat still sends with the `curl` in `SKILL.md`. A template may name no URL.
+
 - **A deposit for a farm now lands enough to start it.** Found live: a $20 deposit for a
   $10-per-leg farm landed $19.88, the farm could not open its $20 cycle, and the only fix
   was another 11 USDC (Papertrade credits nothing under 10). `deposit-plan --target <USD>`

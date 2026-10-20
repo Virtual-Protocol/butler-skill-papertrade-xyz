@@ -3,8 +3,9 @@
 `SKILL.md` step 1 extracts the script below to `/tmp/papertrade.py` with `awk`, every turn,
 so it always matches this version of the skill; never retype it. Stdlib only.
 It keeps the session key, signs opens and closes with it, prepares owner steps for
-`acp wallet sign-typed-data`, and reads the account. It never sends a trade itself: every
-request it prepares lands in its own `bodyFile` and goes out with the `curl` in `SKILL.md`.
+`acp wallet sign-typed-data`, and reads the account. In a chat it never sends a trade
+itself: every request it prepares lands in its own `bodyFile` and goes out with the `curl`
+in `SKILL.md`. Only a duty sends one with `send`, since a duty template may name no URL.
 
 ```sh
 python3 /tmp/papertrade.py config
@@ -80,6 +81,7 @@ own signing domain must match, and the token must be PAPER. A failure there is k
 | `history` | closed positions, newest first, with `pnlUsd` and `pnlPct` as Papertrade's app computes them (adjusted PnL less the fee; a liquidation is minus the margin), and a `summary` (`references/account.md`) |
 | `cashflows` | deposits and withdrawals with their `status`; a withdrawal is done at `settled` |
 | `intents` | Papertrade's queue for the owner; with `--intent`, `stillQueued` for one request. Neither queued nor in `account` means it did not go through |
+| `send` | a duty only: posts one `bodyFile` to `/intents` once and returns its HTTP `status` and `answer`. A chat sends with the `curl` in `SKILL.md` |
 | `farm-quote` | the farm ticket, signing nothing: one cycle's `costPerCycleUsd` (the winning legs' haircut and Papertrade's win fee) and `paperPerCycle` (PAPER per $1 lost is read from the owner's own losing closes; `null` until there is one), `costPer1kPaperUsd`, `breakEvenUsdPerPaper`, `cyclesForBudget`, `paperForBudget`, `wipedOutAtMovePct`, `safeLeverage`, exit prices, and `summary`, `breakEven`, `badCase` and `warnings` to say (`references/farm.md`), and `farmNeedsUsd`, a cycle's hold plus the budget, which the whole budget needs available. Refuses settings that cannot work, and a cycle that does not fit `availableUsd` with the deposit that would fit the farm |
 | `withdraw-typed-data` / `withdraw-body` | the owner's signature for a withdrawal to their Hyperliquid account |
 | `staking` | PAPER in the wallet and staked, USDC rewards to claim, the minimum stake, and `stakeNote` / `unstakeNote` / `claimNote`: why that action cannot run now (`references/staking.md`) |
@@ -1377,6 +1379,17 @@ def _refresh_duty_copy():
         pass
 
 
+def send(body_file):
+    """POST one prepared bodyFile to /intents, once. Only a duty uses it: a chat sends with the
+    curl in SKILL.md, where the owner can see the request go out."""
+    if not IN_DUTY:
+        raise Refused("send is for a duty; in a chat, send the bodyFile with the curl in SKILL.md")
+    with open(body_file) as f:
+        body = json.load(f)
+    status, text = _http(API + "/intents", body, timeout=60)
+    return {"status": str(status), "answer": text}
+
+
 def duty_helper(owner):
     if not _load_key(owner):
         raise Refused("no session key yet: register one first (SKILL.md step 2); a duty has nothing to sign with")
@@ -1425,6 +1438,7 @@ def main(argv):
         o.add_argument("--margin", required=True, type=float, help="USD of margin")
         o.add_argument("--leverage", required=True, type=int)
     sub.add_parser("duty-helper").add_argument("--owner", required=True)
+    sub.add_parser("send").add_argument("--body-file", required=True)
     fq = sub.add_parser("farm-quote")
     fq.add_argument("--owner", required=True)
     fq.add_argument("--market", required=True)
@@ -1446,6 +1460,8 @@ def main(argv):
         return config(a.refresh)
     if a.cmd == "markets":
         return markets()
+    if a.cmd == "send":
+        return send(a.body_file)
     owner = _owner(a.owner)
     if a.cmd == "account":
         return account(owner)

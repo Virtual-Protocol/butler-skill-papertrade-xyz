@@ -6,8 +6,9 @@
   four times to file the 226-line farm program by hand and was refused each time
   (`invalid_payload`: title keys, `statusTemplate`, `statusPlan`/`statusSeen`, a bare
   `{next}`), so no farm started. The program now ships as the duty template
-  `papertrade-farm@1` (its own repo, listed in butler-skills `templates.json`), and
-  `references/farm.md` files it with a recipe ref, a timer, a title and six settings.
+  `papertrade-farm@1` (`templates/papertrade-farm` in this repo, listed in butler-skills
+  `templates.json` with that `path`), and `references/farm.md` files it with a recipe
+  ref, a timer, a title and six settings.
   The template words its own status line, so there is no status preview to pass.
 - **"Stop farming" closes the legs.** Found live: asked to stop, a Butler disabled the
   farm and left both legs open, telling the owner to close them in the Papertrade app;

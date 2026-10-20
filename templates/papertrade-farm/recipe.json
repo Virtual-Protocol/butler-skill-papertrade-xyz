@@ -1,0 +1,77 @@
+{
+  "id": "papertrade-farm",
+  "version": 1,
+  "description": "Farm PAPER on Papertrade: hold a long and a short, close both on a set price move, repeat until a loss budget is spent.",
+  "keywords": [
+    "papertrade",
+    "paper",
+    "farm",
+    "farm paper",
+    "papertrade farm",
+    "mint paper"
+  ],
+  "triggers": [
+    "timer"
+  ],
+  "keys": [],
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "PAPERTRADE_HELPER",
+      "MARKET",
+      "MARGIN_USD",
+      "LEVERAGE",
+      "MOVE_PCT",
+      "BUDGET_USD"
+    ],
+    "properties": {
+      "PAPERTRADE_HELPER": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The helper path that `papertrade.py duty-helper` returns, as written."
+      },
+      "MARKET": {
+        "enum": [
+          "BTC",
+          "ETH"
+        ],
+        "description": "The market both legs open on."
+      },
+      "MARGIN_USD": {
+        "type": "number",
+        "minimum": 10,
+        "description": "USD of margin per leg; a cycle holds twice this."
+      },
+      "LEVERAGE": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000,
+        "description": "Leverage of each leg."
+      },
+      "MOVE_PCT": {
+        "type": "number",
+        "minimum": 0.05,
+        "maximum": 10,
+        "description": "Price move in percent, either way from the legs' average entry, that closes both legs."
+      },
+      "BUDGET_USD": {
+        "type": "number",
+        "minimum": 0.01,
+        "description": "USD the closed cycles may lose in all before the farm stops."
+      },
+      "STOP": {
+        "type": "boolean",
+        "default": false,
+        "description": "true stops the farm: it closes every leg it opened, then ends. Set it with a settings update; never pause the duty, which leaves its legs open."
+      }
+    }
+  },
+  "status": {
+    "starting": "First long and short open {next}",
+    "opening": "Cycle {cycle} · {paper} PAPER · check {next}",
+    "open": "Moved {moved}% of {MOVE_PCT}% · check {next}",
+    "waiting": "Papertrade {side} full · retry {next}",
+    "stopping": "Closing the farm's legs · check {next}"
+  }
+}

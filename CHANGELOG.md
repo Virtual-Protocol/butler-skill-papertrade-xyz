@@ -9,6 +9,10 @@
   `papertrade-farm@1` (its own repo, listed in butler-skills `templates.json`), and
   `references/farm.md` files it with a recipe ref, a timer, a title and six settings.
   The template words its own status line, so there is no status preview to pass.
+- **The bad case says the queue can be slow.** Found live: the farm sent its close
+  within seconds of the move, and Papertrade held it for 20 minutes; the losing leg was
+  wiped out at 0.96% meanwhile. `farm-quote`'s `badCase` now says a close can wait minutes
+  in the queue, and its leverage warning no longer says "up to a minute".
 - The helper's new `send` posts one `bodyFile` to `/intents` from inside a duty only; a
   chat still sends with the `curl` in `SKILL.md`. A template may name no URL.
 

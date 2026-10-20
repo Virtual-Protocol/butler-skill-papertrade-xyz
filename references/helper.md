@@ -1300,8 +1300,8 @@ def farm_quote(owner, market, margin, leverage, move_pct, budget):
     warnings = []
     if leverage > safe:
         warnings.append(f"At {leverage}x the losing leg is wiped out only {(wipeout - move) * 100:.2f}% past the "
-                        f"exit. The farm looks once a minute and a close can wait up to a minute in Papertrade's "
-                        f"queue, so a fast move can wipe it out first. {safe}x or lower leaves "
+                        f"exit. The farm looks once a minute and Papertrade's queue can hold a close for minutes "
+                        f"(20 once), so a fast move can wipe it out first. {safe}x or lower leaves "
                         f"{FARM_QUEUE_ROOM * 100:.1f}% of room.")
     room = {"long": m["longRoomUsd"], "short": m["shortRoomUsd"]}
     full = [side for side in room if room[side] is not None and room[side] < notional]
@@ -1342,7 +1342,8 @@ def farm_quote(owner, market, margin, leverage, move_pct, budget):
                       "This buys PAPER with fees; it is not a return, and I can't tell you what PAPER is worth."),
         "badCase": (f"If {m['symbol']} moves more than {wipeout * 100:.2f}% before a close goes through, the losing "
                     f"leg is wiped out: up to {money(margin)} that cycle instead of {money(cost)}, even past "
-                    f"your budget."),
+                    f"your budget. Papertrade's queue can hold a close for minutes, so this can happen "
+                    f"even after the farm has sent it."),
         "warnings": warnings,
     }
 

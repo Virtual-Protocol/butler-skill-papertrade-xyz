@@ -9,6 +9,12 @@
   `papertrade-farm@1` (its own repo, listed in butler-skills `templates.json`), and
   `references/farm.md` files it with a recipe ref, a timer, a title and six settings.
   The template words its own status line, so there is no status preview to pass.
+- **"Stop farming" closes the legs.** Found live: asked to stop, a Butler disabled the
+  farm and left both legs open, telling the owner to close them in the Papertrade app;
+  the losing leg was at -$5 and drifting toward its wipe-out. The farm now stops itself:
+  the Butler sets its `STOP` setting, and the farm closes every leg it opened, waits for
+  Papertrade to close them, and ends with a summary. `farm.md` forbids pausing a farm to
+  stop it.
 - **The bad case says the queue can be slow.** Found live: the farm sent its close
   within seconds of the move, and Papertrade held it for 20 minutes; the losing leg was
   wiped out at 0.96% meanwhile. `farm-quote`'s `badCase` now says a close can wait minutes

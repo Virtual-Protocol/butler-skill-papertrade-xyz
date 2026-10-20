@@ -97,7 +97,8 @@ their yes to every leg the farm opens: a duty asks no one before it opens.
    - `recipe`: `papertrade-farm@1`;
    - a `timer` trigger every 60 seconds;
    - `params`: `PAPERTRADE_HELPER` (the `helper` path), `MARKET`, `MARGIN_USD`,
-     `LEVERAGE`, `MOVE_PCT` and `BUDGET_USD`, as numbers, exactly as quoted;
+     `LEVERAGE`, `MOVE_PCT` and `BUDGET_USD`, as numbers, exactly as quoted (`STOP` is
+     only for stopping it);
    - the title `Farm PAPER on {MARKET}, ${BUDGET_USD} budget`.
 
    A refusal names the setting or field it wants: fix that one and send again. Never
@@ -109,10 +110,13 @@ their yes to every leg the farm opens: a duty asks no one before it opens.
 
 - **"How's my farm?"** Read the duty's status and log, then `history`. The status has the
   budget spent so far; the log has one `cycle` line per closed cycle with its PnL and PAPER.
-- **"Stop farming."** Pause the duty first, so it opens nothing more, then read `account`.
-  The farm's legs are the positions on its `MARKET` at its `MARGIN_USD` and `LEVERAGE`:
-  say their PnL before fees and close them all in one `close --ids` (`SKILL.md` step 7).
-  If the owner holds other positions of that shape, ask which first.
+- **"Stop farming."** Send `duty_update` with `params` `{"STOP": true}`, nothing else.
+  **Never pause or disable the farm to stop it:** a paused farm cannot close its legs, so
+  they sit open with no one watching. With `STOP` the farm closes every leg it opened,
+  waits until Papertrade has closed them (its status reads "Closing the farm's legs"),
+  then ends with a summary in its thread. Tell the owner that; read `account` a few
+  minutes later. A farm leg still open after 10 minutes: say its PnL and close it
+  (`SKILL.md` step 7).
 - **A change** ("make it ETH", "bigger"): stop it as above, show the ticket with the new
   values, quote it, and file a new farm once they agree.
 
@@ -143,5 +147,5 @@ owner after five. A key that is not `ready` gets one note and no request until i
 `renew` still trades. After a request is accepted it waits two minutes before sending
 another for the same legs.
 
-Its settings: `PAPERTRADE_HELPER`, `MARKET`, `MARGIN_USD`, `LEVERAGE`, `MOVE_PCT` and
-`BUDGET_USD`.
+Its settings: `PAPERTRADE_HELPER`, `MARKET`, `MARGIN_USD`, `LEVERAGE`, `MOVE_PCT`,
+`BUDGET_USD`, and `STOP`, which ends it after closing its legs.

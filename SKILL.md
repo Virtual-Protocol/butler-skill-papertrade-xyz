@@ -1,8 +1,8 @@
 ---
 name: papertrade-xyz
-description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, withdraw, and stake PAPER - with a session key Butler keeps.
-version: 1.2.0
-metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade","stake paper","unstake paper","paper staking","claim paper rewards","my paper","paper balance","how much paper"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
+description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, withdraw, stake PAPER, and farm it - with a session key Butler keeps.
+version: 1.3.0
+metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade","stake paper","unstake paper","paper staking","claim paper rewards","my paper","paper balance","how much paper","farm paper","farm on papertrade","papertrade farm","stop farming"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
 ---
 
 ## When to use
@@ -18,7 +18,7 @@ where every trade faces Papertrade's own pool at Hyperliquid's mid price:
 - **Close** - "close my BTC long": step 7. Never wait for anything to close.
 - **Withdraw** - "take my money out of Papertrade": step 8.
 - **PAPER** - "stake my PAPER", "claim my rewards": step 8.
-- **Automate** - "close it at -$5": a duty (`references/duty.md`).
+- **Automate** - "close it at -$5": `references/duty.md`. "Farm PAPER": `references/farm.md`.
 
 Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` does not list.
 
@@ -230,8 +230,7 @@ python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 
 ## Limits
 
-- **No stop-loss or take-profit on Papertrade;** a duty can close at a level
-  (`references/duty.md`).
+- **No stop-loss or take-profit on Papertrade;** a duty can close at a level.
 - **Fees:** a small haircut plus 2% of a winning close's gain; a loss costs nothing extra.
 - **Papertrade's API is unpublished:** an answer unlike `references/api.md` means it
   changed; stop and say so.

@@ -26,8 +26,8 @@ One Butler skill, published by the
 - `SKILL.md` — the playbook (see the hub's
   [SKILL_STANDARD.md](https://github.com/Virtual-Protocol/butler-skills/blob/main/SKILL_STANDARD.md))
 - `references/` — what the playbook points to: the account, the session key, the API,
-  PAPER staking, running it from a duty, and `helper.md`, the helper script the agent
-  extracts and runs
+  PAPER staking, running it from a duty, farming PAPER, and `helper.md`, the helper
+  script the agent extracts and runs
 - `CHANGELOG.md` — one entry per version; every change bumps `version` in SKILL.md
 
 `references/helper.md` holds the tested script verbatim. Change the script, test it, and

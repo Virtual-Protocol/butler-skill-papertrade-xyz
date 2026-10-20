@@ -66,7 +66,7 @@ own signing domain must match, and the token must be PAPER. A failure there is k
 
 | Command | Does |
 | --- | --- |
-| `markets` | the markets Papertrade lists, which are `openable`, `maxLeverage`, `maxPositionUsd`, and the minimums `minMarginUsd` / `minPositionUsd` |
+| `markets` | the markets Papertrade lists, which are `openable`, `maxLeverage`, `maxPositionUsd`, the minimums `minMarginUsd` / `minPositionUsd`, `winFeeRate`, the share of a winning close's gain Papertrade keeps, and `longRoomUsd` / `shortRoomUsd`, the room left under each side's open-interest cap (an open past it is refused) |
 | `account` | the balance, open positions, deposit address, withdrawal limits, PAPER and the session key's state (`references/account.md`) |
 | `deposit-plan` | the least to send so a deposit is credited (`sendAtLeastUsd`), counting USDC already waiting at the deposit address and the one-time 1 USDC fee to open it, with `why` to say to the owner. With `--amount`, refuses an amount that would sit uncredited, or confirms it with `amountUsd` and `depositAddress` for the `acp trade` |
 | `key-status` | `action`: `ready`, `renew` (under a day left), `register`, `key-new`, or `fund-first` (the account never had a deposit, and Papertrade takes no key before one); `expiresIn`; and, whenever it is not `ready`, `todo`: the instruction to carry out in the same turn. In a duty, `todo` is to notify the owner, never a card |
@@ -79,6 +79,7 @@ own signing domain must match, and the token must be PAPER. A failure there is k
 | `history` | closed positions, newest first, with `pnlUsd` and `pnlPct` as Papertrade's app computes them (adjusted PnL less the fee; a liquidation is minus the margin), and a `summary` (`references/account.md`) |
 | `cashflows` | deposits and withdrawals with their `status`; a withdrawal is done at `settled` |
 | `intents` | Papertrade's queue for the owner; with `--intent`, `stillQueued` for one request. Neither queued nor in `account` means it did not go through |
+| `farm-quote` | the farm ticket, signing nothing: one cycle's `costPerCycleUsd` (the winning legs' haircut and Papertrade's win fee) and `paperPerCycle` (PAPER per $1 lost is read from the owner's own losing closes; `null` until there is one), `costPer1kPaperUsd`, `breakEvenUsdPerPaper`, `cyclesForBudget`, `paperForBudget`, `wipedOutAtMovePct`, `safeLeverage`, exit prices, and `summary`, `breakEven`, `badCase` and `warnings` to say (`references/farm.md`). Refuses settings that cannot work |
 | `withdraw-typed-data` / `withdraw-body` | the owner's signature for a withdrawal to their Hyperliquid account |
 | `staking` | PAPER in the wallet and staked, USDC rewards to claim, the minimum stake, and `stakeNote` / `unstakeNote` / `claimNote`: why that action cannot run now (`references/staking.md`) |
 | `stake-typed-data` / `stake-body` | the owner's signature to stake PAPER; `--amount` in PAPER, or `all` |
@@ -916,18 +917,30 @@ def session_body(owner, primary, action, extra):
 
 def markets():
     state = api_get("/state/trading")
+    mids = _mids()
     out = []
     for row in state.get("instruments", []):
         m = dict(zip(INSTRUMENT_FIELDS, row))
+        mid = float(mids.get(m["symbol"], 0) or 0)
+        room = lambda cap, oi: round((int(m[cap]) - int(m[oi])) / WAD * mid, 2) if mid else None
         out.append({
             "id": m["id"], "symbol": m["symbol"],
             "openable": bool(m["active"] and not m["paused"]), "closeOnly": bool(m["closeOnly"]),
             "maxLeverage": m["maxLeverage"],
             "maxPositionUsd": int(m["maxPositionNotional"]) / WAD,
             "priceScale": int(m["priceScale"]),
+            # Papertrade caps open interest per side; an open past the cap is refused
+            # (`admission_rejected`, `openInterest`). Room is what is left under it. The
+            # cap and the open interest count coins, not dollars (2,044 BTC of longs read
+            # $167M at $81,665, matching Papertrade's own page), so room is priced at the
+            # Hyperliquid mid; None when the mid is missing.
+            "longRoomUsd": room("longCap", "longOi"),
+            "shortRoomUsd": room("shortCap", "shortOi"),
         })
     return {"tradingPaused": state.get("tradingPaused"), "minMarginUsd": int(state["minimumTradeSizeRaw"]) / WAD,
-            "minPositionUsd": int(state["minimumOpenNotionalRaw"]) / WAD, "markets": out}
+            "minPositionUsd": int(state["minimumOpenNotionalRaw"]) / WAD,
+            "winFeeRate": int(state["winFeeRateRaw"]) / WAD if state.get("winFeeRateRaw") else None,
+            "markets": out}
 
 
 def _mids():
@@ -1177,6 +1190,127 @@ def quote(owner, market, side, margin, leverage):
     return q, m
 
 
+
+# ---- farming PAPER: one cycle's cost, before anything is filed ------------------------
+# A cycle opens a long and a short of the same size and closes both at +/- the move. The
+# losing leg pays its whole loss and mints PAPER on 98% of it; the winning leg is paid back
+# less Papertrade's haircut: 10% base, a per-market knee that bites hardest on small moves,
+# and a 0.2 bp deadband. These are the figures Papergainz' farm page uses; its published
+# cycle ($8,000 x 50x, 100 pairs, 1% on BTC: $47,399.20 for 4,290,739 PAPER) comes out
+# to the cent with them. Papergainz leaves out Papertrade's win fee (2% today, read live
+# from `winFeeRateRaw`), which is taken from what the haircut leaves, so it is added here.
+FARM_BASE_HAIRCUT = 0.10
+FARM_KNEE = {"BTC": 1.894e-4, "ETH": 2.733e-4}
+FARM_DEADBAND = 2e-5
+FARM_MINT_SHARE = 0.98
+FARM_MAINTENANCE = 5e-4      # a leg is wiped out this far before 1/leverage
+FARM_QUEUE_ROOM = 3e-3       # room past the exit for a close waiting in Papertrade's queue
+
+
+def _farm_wipeout(leverage):
+    return max(2 * FARM_DEADBAND, 1 / leverage - FARM_MAINTENANCE)
+
+
+def _farm_paper_rate(owner):
+    """PAPER per $1 lost, from the owner's own losing closes. Papertrade publishes no rate,
+    so with no losing close yet it is unknown, never guessed."""
+    lost = minted = 0.0
+    for t in history(owner, 50)["trades"]:
+        if t["paperMinted"] > 0 and t["pnlUsd"] < 0:
+            lost, minted = lost - t["pnlUsd"], minted + t["paperMinted"]
+    return round(minted / (lost * FARM_MINT_SHARE), 2) if lost > 0 else None
+
+
+def farm_quote(owner, market, margin, leverage, move_pct, budget):
+    """The farm ticket: what one cycle (a long and a short) costs and mints at these settings,
+    and how many cycles the budget buys. Signs nothing."""
+    mk = markets()
+    m = next((x for x in mk["markets"] if x["symbol"].upper() == market.upper()), None)
+    if not m or m["symbol"] not in FARM_KNEE:
+        raise Refused(f"a farm runs on {' or '.join(FARM_KNEE)}, not {market}")
+    if mk["tradingPaused"] or not m["openable"]:
+        raise Refused(f"{m['symbol']} is not open for new positions now")
+    move = move_pct / 100
+    if not 0.0005 <= move <= 0.1:
+        raise Refused("the move per cycle must be 0.05% to 10%")
+    if margin < mk["minMarginUsd"]:
+        raise Refused(f"margin per leg must be at least ${mk['minMarginUsd']:g}")
+    if not 1 <= leverage <= min(m["maxLeverage"], 1000):
+        raise Refused(f"leverage must be 1 to {m['maxLeverage']}")
+    notional = margin * leverage
+    if notional < mk["minPositionUsd"]:
+        raise Refused(f"each leg is ${notional:,.0f}; Papertrade's minimum is ${mk['minPositionUsd']:,.0f}: raise "
+                      f"leverage to {int(-(-mk['minPositionUsd'] // margin))}x or margin to "
+                      f"${int(-(-mk['minPositionUsd'] // leverage))}")
+    if notional > m["maxPositionUsd"]:
+        raise Refused(f"each leg must be at most ${m['maxPositionUsd']:,.0f}")
+    wipeout = _farm_wipeout(leverage)
+    if wipeout <= move:
+        raise Refused(f"at {leverage}x the losing leg is wiped out at about {wipeout * 100:.2f}%, before the "
+                      f"{move_pct:g}% exit: lower the leverage to {int(1 / (move + FARM_MAINTENANCE))}x or less")
+    acct = account(owner)
+    available = acct["availableUsd"]
+    uses = 2 * margin
+    if uses > available + 1e-9:
+        raise Refused(f"a cycle holds ${uses:,.2f} (2 legs x ${margin:g}); ${available:,.2f} is available")
+
+    if mk["winFeeRate"] is None:
+        raise Refused("cannot read Papertrade's win fee, so a cycle's cost is unknown")
+    knee = FARM_KNEE[m["symbol"]]
+    kept = (move - FARM_DEADBAND) * (1 - FARM_BASE_HAIRCUT) / (1 + knee / move) * (1 - mk["winFeeRate"])
+    loss, gain = move * notional, kept * notional
+    cost = loss - gain
+    if budget < cost:
+        raise Refused(f"a budget of ${budget:,.2f} is less than one cycle (${cost:,.2f})")
+    rate = _farm_paper_rate(owner)
+    paper = loss * FARM_MINT_SHARE * rate if rate else None
+    safe = int(1 / (move + FARM_MAINTENANCE + FARM_QUEUE_ROOM))
+    cycles = int(budget // cost)
+    mid = float(_mids().get(m["symbol"], 0) or 0)
+    money = lambda x: f"${x:,.2f}"
+    warnings = []
+    if leverage > safe:
+        warnings.append(f"At {leverage}x the losing leg is wiped out only {(wipeout - move) * 100:.2f}% past the "
+                        f"exit. The farm looks once a minute and a close can wait up to a minute in Papertrade's "
+                        f"queue, so a fast move can wipe it out first. {safe}x or lower leaves "
+                        f"{FARM_QUEUE_ROOM * 100:.1f}% of room.")
+    room = {"long": m["longRoomUsd"], "short": m["shortRoomUsd"]}
+    full = [side for side in room if room[side] is not None and room[side] < notional]
+    if full:
+        left = " and ".join(f"${max(0.0, room[side]):,.0f} of {side}s" for side in full)
+        warnings.append(f"Papertrade is full on {m['symbol']} {' and '.join(s + 's' for s in full)} right now: each "
+                        f"leg is ${notional:,.0f}, and there is room for {left}. The farm waits and starts once "
+                        f"both sides have room, which may take a while.")
+    if rate is None:
+        warnings.append("PAPER per cycle is unknown until this account has closed a losing position: "
+                        "Papertrade does not publish its mint rate.")
+    return {
+        "market": m["symbol"], "marginPerLegUsd": margin, "leverage": leverage, "movePct": move_pct,
+        "budgetUsd": budget,
+        "notionalPerLegUsd": round(notional, 2), "cycleHoldsUsd": round(uses, 2),
+        "losingLegsPayUsd": round(loss, 2), "winningLegsKeepUsd": round(gain, 2),
+        "winningKeepsPct": round(gain / loss * 100, 1), "winFeePct": round(mk["winFeeRate"] * 100, 2),
+        "costPerCycleUsd": round(cost, 2), "paperPerCycle": round(paper) if paper else None,
+        "paperPerUsdLost": rate, "costPer1kPaperUsd": round(cost / paper * 1000, 2) if paper else None,
+        "availableUsd": available, "cyclesForBudget": cycles,
+        "paperForBudget": round(paper * cycles) if paper else None,
+        "markPrice": mid or None,
+        "exitUpPrice": round(mid * (1 + move), 2) if mid else None,
+        "exitDownPrice": round(mid * (1 - move), 2) if mid else None,
+        "wipedOutAtMovePct": round(wipeout * 100, 2), "safeLeverage": safe,
+        "summary": (f"Each cycle costs {money(cost)} for {round(paper):,} PAPER." if paper else
+                    f"Each cycle costs {money(cost)}; the PAPER it mints is unknown until your first losing close."),
+        "breakEvenUsdPerPaper": round(cost / paper, 5) if paper else None,
+        "breakEven": (f"It is worth it only if PAPER is worth more than {cost / paper * 100:.2f} cents to you. "
+                      f"This buys PAPER with fees; it is not a return, and I can't tell you what PAPER is worth."
+                      if paper else
+                      "This buys PAPER with fees; it is not a return, and I can't tell you what PAPER is worth."),
+        "badCase": (f"If {m['symbol']} moves more than {wipeout * 100:.2f}% before a close goes through, the losing "
+                    f"leg is wiped out: up to {money(margin)} that cycle instead of {money(cost)}, even past "
+                    f"your budget."),
+        "warnings": warnings,
+    }
+
 # ---- command line ----------------------------------------------------------------
 
 # Each needs the owner: a key, an owner card, or the path a duty is filed with.
@@ -1257,6 +1391,13 @@ def main(argv):
         o.add_argument("--margin", required=True, type=float, help="USD of margin")
         o.add_argument("--leverage", required=True, type=int)
     sub.add_parser("duty-helper").add_argument("--owner", required=True)
+    fq = sub.add_parser("farm-quote")
+    fq.add_argument("--owner", required=True)
+    fq.add_argument("--market", required=True)
+    fq.add_argument("--margin", required=True, type=float, help="USD of margin per leg")
+    fq.add_argument("--leverage", required=True, type=int)
+    fq.add_argument("--move", required=True, type=float, help="percent; both legs close at +/- this")
+    fq.add_argument("--budget", required=True, type=float, help="USD; the farm stops once it has lost this much")
     c = sub.add_parser("close")
     c.add_argument("--owner", required=True)
     c.add_argument("--ids", required=True, help="comma-separated position ids, at most 12")
@@ -1320,6 +1461,8 @@ def main(argv):
         return cashflows(owner, a.limit)
     if a.cmd == "intents":
         return intents(owner, a.intent)
+    if a.cmd == "farm-quote":
+        return farm_quote(owner, a.market, a.margin, a.leverage, a.move, a.budget)
     if a.cmd in ("quote", "open"):
         q, m = quote(owner, a.market, a.side, a.margin, a.leverage)
         if a.cmd == "quote":

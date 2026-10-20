@@ -1,7 +1,7 @@
 ---
 name: papertrade-xyz
 description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, withdraw, stake PAPER, and farm it - with a session key Butler keeps.
-version: 1.3.0
+version: 1.3.1
 metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade","stake paper","unstake paper","paper staking","claim paper rewards","my paper","paper balance","how much paper","farm paper","farm on papertrade","papertrade farm","stop farming"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
 ---
 
@@ -92,11 +92,10 @@ Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` doe
    minute: "Accepted but not landed" below.
 
 3. [FIXED] Fund only when asked or when `availableUsd` is below the margin they want. Plan
-   it first: it counts what already waits at their deposit address and refuses an amount
-   that would sit there uncredited:
+   it first; `--target` is what they need available, bridge fee added:
 
    ```sh
-   python3 /tmp/papertrade.py deposit-plan --owner <OWNER> --amount <USDC>
+   python3 /tmp/papertrade.py deposit-plan --owner <OWNER> --amount <USDC> [--target <USD>]
    acp trade --token-in usdc --amount-in <amountUsd> --token-out usdc --chain-out 1337 --recipient <depositAddress> --idempotency-key <KEY>:deposit
    ```
 

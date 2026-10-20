@@ -60,7 +60,11 @@ python3 /tmp/papertrade.py farm-quote --owner <OWNER> --market <MARKET> --margin
 ```
 
 Quote only once every field has their value. A refusal is said as written, and the ticket
-shown again with that field marked for them to change.
+shown again with that field marked for them to change. A refusal for funds is not a field
+to change: it already says the least to send, with the bridge fee on top. Offer that
+deposit (`SKILL.md` step 3, with `--target` set to the farm's need it names), and quote
+again once `availableUsd` has risen. Never offer the bare gap: the bridge keeps a little
+of it, and Papertrade credits nothing under 10 USDC.
 Otherwise say, from its fields only:
 
 > **{badCase}**

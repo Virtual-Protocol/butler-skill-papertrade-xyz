@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.1
+
+- **A deposit for a farm now lands enough to start it.** Found live: a $20 deposit for a
+  $10-per-leg farm landed $19.88, the farm could not open its $20 cycle, and the only fix
+  was another 11 USDC (Papertrade credits nothing under 10). `deposit-plan --target <USD>`
+  returns the least to send so that much is available after it lands: the gap plus the
+  bridge fee and any first-arrival fee, never under the credit minimum. `farm-quote`
+  refuses a cycle that does not fit `availableUsd` with that deposit already worked out,
+  and returns `farmNeedsUsd` (a cycle's hold plus the budget); when only part of the
+  budget fits, it warns how many cycles will run before the farm stops.
+
 ## 1.3.0
 
 - **Papertrade's open-interest cap.** `markets` reports `longRoomUsd` and `shortRoomUsd`,

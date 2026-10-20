@@ -3,7 +3,8 @@
 ## 1.2.0
 
 - **Papertrade's open-interest cap.** `markets` reports `longRoomUsd` and `shortRoomUsd`,
-  the room left under each side's cap. `farm-quote` warns when a leg does not fit. The
+  the room left under each side's cap, in dollars: Papertrade counts the cap in coins, so
+  the helper prices it at the Hyperliquid mid. `farm-quote` warns when a leg does not fit. The
   duty opens only when both legs fit, the tighter side first, and otherwise waits with one
   note ("Papertrade is full on BTC longs right now, so your farm is waiting"). A cap that
   fills between the check and the open (`admission_rejected`, `openInterest`) is not

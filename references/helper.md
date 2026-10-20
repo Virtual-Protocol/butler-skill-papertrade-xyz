@@ -682,9 +682,12 @@ def session_body(owner, primary, action, extra):
 
 def markets():
     state = api_get("/state/trading")
+    mids = _mids()
     out = []
     for row in state.get("instruments", []):
         m = dict(zip(INSTRUMENT_FIELDS, row))
+        mid = float(mids.get(m["symbol"], 0) or 0)
+        room = lambda cap, oi: round((int(m[cap]) - int(m[oi])) / WAD * mid, 2) if mid else None
         out.append({
             "id": m["id"], "symbol": m["symbol"],
             "openable": bool(m["active"] and not m["paused"]), "closeOnly": bool(m["closeOnly"]),
@@ -692,9 +695,12 @@ def markets():
             "maxPositionUsd": int(m["maxPositionNotional"]) / WAD,
             "priceScale": int(m["priceScale"]),
             # Papertrade caps open interest per side; an open past the cap is refused
-            # (`admission_rejected`, `openInterest`). Room is what is left under it.
-            "longRoomUsd": round((int(m["longCap"]) - int(m["longOi"])) / WAD, 2),
-            "shortRoomUsd": round((int(m["shortCap"]) - int(m["shortOi"])) / WAD, 2),
+            # (`admission_rejected`, `openInterest`). Room is what is left under it. The
+            # cap and the open interest count coins, not dollars (2,044 BTC of longs read
+            # $167M at $81,665, matching Papertrade's own page), so room is priced at the
+            # Hyperliquid mid; None when the mid is missing.
+            "longRoomUsd": room("longCap", "longOi"),
+            "shortRoomUsd": room("shortCap", "shortOi"),
         })
     return {"tradingPaused": state.get("tradingPaused"), "minMarginUsd": int(state["minimumTradeSizeRaw"]) / WAD,
             "minPositionUsd": int(state["minimumOpenNotionalRaw"]) / WAD,
@@ -1027,7 +1033,7 @@ def farm_quote(owner, market, margin, leverage, move_pct, budget):
                         f"queue, so a fast move can wipe it out first. {safe}x or lower leaves "
                         f"{FARM_QUEUE_ROOM * 100:.1f}% of room.")
     room = {"long": m["longRoomUsd"], "short": m["shortRoomUsd"]}
-    full = [side for side in room if room[side] < notional]
+    full = [side for side in room if room[side] is not None and room[side] < notional]
     if full:
         left = " and ".join(f"${max(0.0, room[side]):,.0f} of {side}s" for side in full)
         warnings.append(f"Papertrade is full on {m['symbol']} {' and '.join(s + 's' for s in full)} right now: each "

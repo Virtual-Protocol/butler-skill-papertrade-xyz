@@ -355,7 +355,9 @@ for tick in bevo.ticks():
     market = next((m for m in (helper("markets") or {}).get("markets", []) if m["symbol"] == MARKET), None)
     if market is None:
         continue
-    room = {"long": market["longRoomUsd"], "short": market["shortRoomUsd"]}
+    # Unknown room (no price) tries the open; Papertrade refuses it if the cap is full.
+    room = {side: market[side + "RoomUsd"] for side in ("long", "short")}
+    room = {side: float("inf") if usd is None else usd for side, usd in room.items()}
     full = [side + "s" for side in room if room[side] < MARGIN * LEVERAGE]
     if full:
         if not bevo.state.get("told_full"):

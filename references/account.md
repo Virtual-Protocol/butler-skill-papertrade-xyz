@@ -15,6 +15,7 @@ positions, funding and the session key. Relay its figures; never work one out.
 | `withdrawActivationFeeUsd` | `0` or `1`: the one-time fee Papertrade takes on top of a first withdrawal when the owner has no Hyperliquid account yet |
 | `maxWithdrawUsd` | the most a withdrawal can ask for now: `availableUsd` less the activation fee when one is owed. Under 10 means nothing can be withdrawn yet |
 | `withdrawNote` | set only when nothing can be withdrawn: the sentence to say, word for word. `null` otherwise |
+| `paper` | `balance` (PAPER in the wallet), `staked` (PAPER staked) and `rewardsUsd` (USDC rewards ready to claim), or `null` when they could not be read. Details and limits: `staking` (`references/staking.md`) |
 | `sessionKey.action` | `ready`, `renew`, `register` or `key-new` (`references/session-key.md`); `sessionKey.expiresIn` says how long is left |
 
 ### A position

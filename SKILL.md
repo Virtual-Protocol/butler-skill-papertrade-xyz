@@ -1,8 +1,8 @@
 ---
 name: papertrade-xyz
-description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, and withdraw - with a session key Butler keeps.
-version: 1.2.0
-metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade","farm paper","farm on papertrade","papertrade farm","stop farming"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
+description: Trade BTC and ETH perpetuals on Papertrade (papertrade.xyz) - fund the account, open a long or a short, close it, withdraw, stake PAPER, and farm it - with a session key Butler keeps.
+version: 1.3.0
+metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz","synthetic perps","1000x","high leverage","long btc","short btc","long eth","short eth","papertrade position","close my papertrade","papertrade balance","withdraw from papertrade","deposit to papertrade","stake paper","unstake paper","paper staking","claim paper rewards","my paper","paper balance","how much paper","farm paper","farm on papertrade","papertrade farm","stop farming"],"requires":{"bins":["python3","curl","cat","awk","bevo-read","acp"]}}}
 ---
 
 ## When to use
@@ -10,14 +10,15 @@ metadata: {"butler":{"moneyMoving":true,"keywords":["papertrade","papertrade.xyz
 Your owner wants to act on **Papertrade**, a perpetuals exchange on Hyperliquid's HyperEVM
 where every trade faces Papertrade's own pool at Hyperliquid's mid price:
 
-- **Look** - "what's my Papertrade balance", "my positions": step 1, then stop.
+- **Look** - "what's my Papertrade balance", "my positions", "my PAPER": step 1, then stop.
 - **History** - "how did my trades do", "my PnL": step 1, then `history`
   (`references/account.md`). Relay its figures; never add them up yourself.
 - **Fund** - "put $50 into Papertrade": step 3.
 - **Open** - "long BTC 100x with $20": steps 4 to 6 (`quote` first, always).
 - **Close** - "close my BTC long": step 7. Never wait for anything to close.
 - **Withdraw** - "take my money out of Papertrade": step 8.
-- **Automate** - "close it at -$5": `references/duty.md`. Farm: `references/farm.md`.
+- **PAPER** - "stake my PAPER", "claim my rewards": step 8.
+- **Automate** - "close it at -$5": `references/duty.md`. "Farm PAPER": `references/farm.md`.
 
 Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` does not list.
 
@@ -92,7 +93,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` doe
 
 3. [FIXED] Fund only when asked or when `availableUsd` is below the margin they want. Plan
    it first: it counts what already waits at their deposit address and refuses an amount
-   that would sit there uncredited. Its refusal is said as written; nothing is filed:
+   that would sit there uncredited:
 
    ```sh
    python3 /tmp/papertrade.py deposit-plan --owner <OWNER> --amount <USDC>
@@ -147,26 +148,30 @@ Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` doe
    No card while the key is usable. If `close` says it is not registered, file the
    registration (step 2) at once; the close waits for the owner.
 
-8. [FIXED] Withdraw only when asked, at most `maxWithdrawUsd` and at least 10. It lands
-   in their Hyperliquid account. A first withdrawal can owe a one-time 1 USDC activation
-   fee (`withdrawActivationFeeUsd`) on top; `maxWithdrawUsd` already leaves it out. Say
-   so first. If `account` has a `withdrawNote`, say it word for word and file
-   nothing; never offer a smaller amount.
+8. [FIXED] Withdraw or stake only when asked; each is an owner card. `<OP>` is:
+   - `withdraw`: at most `maxWithdrawUsd` USDC, at least 10, to their Hyperliquid
+     account. A first one can owe a one-time 1 USDC fee (`withdrawActivationFeeUsd`) on
+     top, already left out of `maxWithdrawUsd`. Say so first.
+   - `stake` or `unstake` (`--amount` PAPER or `all`), or `claim` (no `--amount`): read
+     `staking` first (`references/staking.md`).
+
+   A `withdrawNote`, or the action's `<OP>Note`, is said word for word and nothing is
+   filed; never offer a smaller amount.
 
    ```sh
-   python3 /tmp/papertrade.py withdraw-typed-data --owner <OWNER> --amount <USDC>
-   acp wallet sign-typed-data --data "$(cat <typedDataFile>)" --chain-id 999 --purpose "Withdraw <USDC> USDC from Papertrade to your Hyperliquid account" --reading "$(cat <readingFile>)" --idempotency-key <KEY>:withdraw
+   python3 /tmp/papertrade.py <OP>-typed-data --owner <OWNER> --amount <AMOUNT>
+   acp wallet sign-typed-data --data "$(cat <typedDataFile>)" --chain-id 999 --purpose "<purpose>" --reading "$(cat <readingFile>)" --idempotency-key <KEY>:<OP>
    ```
 
-   Approval card; then step 9 with `<KEY>:withdraw`, and:
+   `<purpose>` is as printed. Approval card; then step 9 with `<KEY>:<OP>`, and:
 
    ```sh
-   python3 /tmp/papertrade.py withdraw-body --owner <OWNER> --signature <SIGNATURE>
+   python3 /tmp/papertrade.py <OP>-body --owner <OWNER> --signature <SIGNATURE>
    curl -sS -X POST https://exchange.papertrade.xyz/intents -H "Content-Type: application/json" --data @<bodyFile> -w "\n%{http_code}\n"
    ```
 
    The signature is good for one hour; past that, build it again and file a new card.
-   It is done when `cashflows` shows the withdrawal `settled`.
+   A withdrawal is done at `cashflows` `settled`; the rest when `staking` shows it.
 
 9. [FIXED] Wait for a card's outcome; never file it again to find out:
 
@@ -182,7 +187,7 @@ Not this skill: Hyperliquid's own perps (`acp trade`), or a market `markets` doe
 
 ## Idempotency and retries
 
-One key per errand, such as `pt:btc:long:1`, with `:register`, `:deposit` and `:withdraw`.
+One key per errand, such as `pt:btc:long:1`, with `:register`, `:deposit` or `:<OP>`.
 On an error, a timeout or an unclear answer, **do not re-run** a signing or `acp trade`
 command: a second deposit spends twice. Look it up as in step 9. A `curl` to `/intents`
 may be sent again **with the same `bodyFile` only** - Papertrade refuses a used nonce -
@@ -198,11 +203,11 @@ Every build prints an `intentId`. When a `201` has not shown up in `account` or
 python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 ```
 
-- `stillQueued: true` - still waiting its turn; say so and read again later.
+- `stillQueued: true` - still waiting; say so and read again later.
 - `false`, and still not in `account` - it did not go through, and nothing moved. Say so.
-  An open or a close is built again only if the owner asks again. A registration or a
-  withdrawal needs a new card: build it again (`register-typed-data` or
-  `withdraw-typed-data`, never `key-new`) and file it with a new key.
+  An open or a close is built again only if the owner asks again. An owner step needs a
+  new card: build it again (`register-typed-data` or `<OP>-typed-data`, never `key-new`)
+  with a new key.
 
 ## Failure handling
 
@@ -218,24 +223,20 @@ python3 /tmp/papertrade.py intents --owner <OWNER> --intent <intentId>
 | `deadline_expired` | Build it again; for an owner step, a new card. |
 | `intent_conflict` | That intent is already in; read `account`. |
 | `below_minimum_withdrawal` | Withdraw at least 10. |
+| `below_minimum_paper_stake`, `intake_action_paused`, `paperBalance`, `stakedBalance`, `noRewards` | Re-read `staking`; say its note. |
 | `rate_limited` | Wait a minute, then send the same `bodyFile`. |
 | Helper `error: ...` | Give it as written; nothing was sent. |
 | `on-chain check failed` | Papertrade changed its contracts. Stop and say so. |
 
 ## Limits
 
-- **Markets:** those `markets` lists `openable` (BTC, ETH today).
-- **No stop-loss or take-profit on Papertrade;** a duty can close at a level
-  (`references/duty.md`).
+- **No stop-loss or take-profit on Papertrade;** a duty can close at a level.
 - **Fees:** a small haircut plus 2% of a winning close's gain; a loss costs nothing extra.
-- **Deposits** come from the owner's USDC through `acp trade` only.
 - **Papertrade's API is unpublished:** an answer unlike `references/api.md` means it
   changed; stop and say so.
 
 ## Say to the owner
 
 - Leverage in dollars: "a $2,000 position with $20 of your money", never just "100x".
-- The bad case before the upside, every time.
-- "Queued" until `account` shows the position; never "filled" from a `201`.
-- Approval cards: what it lets Butler do, then "approve it in the app".
+- Approval cards: what it does, then "approve it in the app".
 - After a close: what came back to `availableUsd`, from the read.

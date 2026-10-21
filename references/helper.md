@@ -3,14 +3,16 @@
 `SKILL.md` step 1 extracts the script below to `/tmp/papertrade.py` with `awk`, every turn,
 so it always matches this version of the skill; never retype it. Stdlib only.
 It keeps the session key, signs opens and closes with it, prepares owner steps for
-`acp wallet sign-typed-data`, and reads the account. It never sends a trade itself: every
-request it prepares lands in its own `bodyFile` and goes out with the `curl` in `SKILL.md`.
+`acp wallet sign-typed-data`, and reads the account. In a chat it never sends a trade
+itself: every request it prepares lands in its own `bodyFile` and goes out with the `curl`
+in `SKILL.md`. Only a duty sends one with `send`, since a duty template may name no URL.
 
 ```sh
 python3 /tmp/papertrade.py config
 python3 /tmp/papertrade.py markets
 python3 /tmp/papertrade.py account --owner <OWNER>
 python3 /tmp/papertrade.py deposit-plan --owner <OWNER> --amount 20
+python3 /tmp/papertrade.py deposit-plan --owner <OWNER> --target 28 --amount 30
 python3 /tmp/papertrade.py key-status --owner <OWNER>
 python3 /tmp/papertrade.py duty-helper --owner <OWNER>
 python3 /tmp/papertrade.py key-new --owner <OWNER>
@@ -68,7 +70,7 @@ own signing domain must match, and the token must be PAPER. A failure there is k
 | --- | --- |
 | `markets` | the markets Papertrade lists, which are `openable`, `maxLeverage`, `maxPositionUsd`, the minimums `minMarginUsd` / `minPositionUsd`, `winFeeRate`, the share of a winning close's gain Papertrade keeps, and `longRoomUsd` / `shortRoomUsd`, the room left under each side's open-interest cap (an open past it is refused) |
 | `account` | the balance, open positions, deposit address, withdrawal limits, PAPER and the session key's state (`references/account.md`) |
-| `deposit-plan` | the least to send so a deposit is credited (`sendAtLeastUsd`), counting USDC already waiting at the deposit address and the one-time 1 USDC fee to open it, with `why` to say to the owner. With `--amount`, refuses an amount that would sit uncredited, or confirms it with `amountUsd` and `depositAddress` for the `acp trade` |
+| `deposit-plan` | the least to send so a deposit is credited (`sendAtLeastUsd`), counting USDC already waiting at the deposit address and the one-time 1 USDC fee to open it, with `why` to say to the owner. With `--target`, the least to send so that much is available once it lands: the gap plus the bridge fee and any first-arrival fee, never under the credit minimum. With `--amount`, refuses an amount that would sit uncredited (or, with `--target`, land short), or confirms it with `amountUsd` and `depositAddress` for the `acp trade` |
 | `key-status` | `action`: `ready`, `renew` (under a day left), `register`, `key-new`, or `fund-first` (the account never had a deposit, and Papertrade takes no key before one); `expiresIn`; and, whenever it is not `ready`, `todo`: the instruction to carry out in the same turn. In a duty, `todo` is to notify the owner, never a card |
 | `key-new` | makes a session key and prints only its address; refuses whenever one exists |
 | `duty-helper` | the path a duty runs (`helper`), for its `PAPERTRADE_HELPER` setting; refuses without a key |
@@ -79,7 +81,8 @@ own signing domain must match, and the token must be PAPER. A failure there is k
 | `history` | closed positions, newest first, with `pnlUsd` and `pnlPct` as Papertrade's app computes them (adjusted PnL less the fee; a liquidation is minus the margin), and a `summary` (`references/account.md`) |
 | `cashflows` | deposits and withdrawals with their `status`; a withdrawal is done at `settled` |
 | `intents` | Papertrade's queue for the owner; with `--intent`, `stillQueued` for one request. Neither queued nor in `account` means it did not go through |
-| `farm-quote` | the farm ticket, signing nothing: one cycle's `costPerCycleUsd` (the winning legs' haircut and Papertrade's win fee) and `paperPerCycle` (PAPER per $1 lost is read from the owner's own losing closes; `null` until there is one), `costPer1kPaperUsd`, `breakEvenUsdPerPaper`, `cyclesForBudget`, `paperForBudget`, `wipedOutAtMovePct`, `safeLeverage`, exit prices, and `summary`, `breakEven`, `badCase` and `warnings` to say (`references/farm.md`). Refuses settings that cannot work |
+| `send` | a duty only: posts one `bodyFile` to `/intents` once and returns its HTTP `status` and `answer`. A chat sends with the `curl` in `SKILL.md` |
+| `farm-quote` | the farm ticket, signing nothing: one cycle's `costPerCycleUsd` (the winning legs' haircut and Papertrade's win fee) and `paperPerCycle` (PAPER per $1 lost is read from the owner's own losing closes; `null` until there is one), `costPer1kPaperUsd`, `breakEvenUsdPerPaper`, `cyclesForBudget`, `paperForBudget`, `wipedOutAtMovePct`, `safeLeverage`, exit prices, and `summary`, `breakEven`, `badCase` and `warnings` to say (`references/farm.md`), and `farmNeedsUsd`, a cycle's hold plus the budget, which the whole budget needs available. Refuses settings that cannot work, and a cycle that does not fit `availableUsd` with the deposit that would fit the farm |
 | `withdraw-typed-data` / `withdraw-body` | the owner's signature for a withdrawal to their Hyperliquid account |
 | `staking` | PAPER in the wallet and staked, USDC rewards to claim, the minimum stake, and `stakeNote` / `unstakeNote` / `claimNote`: why that action cannot run now (`references/staking.md`) |
 | `stake-typed-data` / `stake-body` | the owner's signature to stake PAPER; `--amount` in PAPER, or `all` |
@@ -970,28 +973,50 @@ def deposit_state(owner):
             "activationFeeUsd": 0 if opened else ACTIVATION_FEE}
 
 
-def deposit_plan(owner, amount=None):
+def deposit_plan(owner, amount=None, target=None):
     """The least to send so a deposit is credited, and, given an amount, the acp trade for it
-    or why it would sit uncredited. Credit needs SWEEP_MIN at the deposit address in all."""
+    or why it would sit uncredited. Credit needs SWEEP_MIN at the deposit address in all.
+    With a target, the least to send so the owner then has that much available: the bridge
+    and the first-arrival fee come off the way, so asking for the bare gap lands short."""
     d = deposit_state(owner)
     pending, fee = d["pendingUsd"], d["activationFeeUsd"]
     missing = max(0.0, SWEEP_MIN - pending)
     least = max(BOT_MIN_DEPOSIT, math.ceil(missing + fee + BRIDGE_BUFFER - 1e-9))
     plan = {"depositAddress": d["depositAddress"], "pendingDepositUsd": pending, "activationFeeUsd": fee,
-            "bridgeBufferUsd": BRIDGE_BUFFER, "sendAtLeastUsd": least}
-    if pending >= SWEEP_MIN:
-        plan["why"] = (f"{pending:g} USDC is already at your deposit address and is being credited; no "
-                       f"deposit is needed for that. Anything more needs at least {least:g} USDC.")
+            "bridgeBufferUsd": BRIDGE_BUFFER}
+    first = f", plus the one-time {fee:g} USDC fee to open it" if fee else ""
+    if target is not None:
+        available = account(owner)["availableUsd"]
+        short = round(target - available - pending, 6)
+        plan.update({"targetUsd": target, "availableUsd": available})
+        if short <= 0:
+            plan.update({"sendAtLeastUsd": 0, "why": f"{available:g} USDC is available, enough for {target:g}; "
+                                                    f"no deposit is needed."})
+            if amount is None:
+                return plan
+        else:
+            gap = math.ceil(short + fee + BRIDGE_BUFFER - 1e-9)
+            floor = f", and Papertrade credits nothing under {SWEEP_MIN:g} USDC" if least > gap else ""
+            opening = f", plus a one-time {fee:g} USDC fee to open your deposit address" if fee else ""
+            least = max(least, gap)
+            plan.update({"sendAtLeastUsd": least, "why": (
+                f"You need {target:g} USDC available and have {available:g}. The bridge from Base keeps a "
+                f"small fee{opening}{floor}, so send at least {least:g} USDC.")})
+    elif pending >= SWEEP_MIN:
+        plan.update({"sendAtLeastUsd": least, "why": (
+            f"{pending:g} USDC is already at your deposit address and is being credited; no "
+            f"deposit is needed for that. Anything more needs at least {least:g} USDC.")})
     else:
         waiting = f"; {pending:g} USDC is already waiting there" if pending else ""
-        first = f", plus the one-time {fee:g} USDC fee to open it" if fee else ""
-        plan["why"] = (f"Papertrade credits a deposit once at least {SWEEP_MIN:g} USDC has arrived at your "
-                       f"deposit address{first}{waiting}. The bridge from Base takes a small fee, so send at "
-                       f"least {least:g} USDC.")
+        plan.update({"sendAtLeastUsd": least, "why": (
+            f"Papertrade credits a deposit once at least {SWEEP_MIN:g} USDC has arrived at your "
+            f"deposit address{first}{waiting}. The bridge from Base takes a small fee, so send at "
+            f"least {least:g} USDC.")})
     if amount is None:
         return plan
     if amount + 1e-9 < least:
-        raise Refused(f"{amount:g} USDC would sit at your deposit address uncredited. {plan['why']}")
+        raise Refused(f"{amount:g} USDC would leave you short. {plan['why']}" if target is not None else
+                      f"{amount:g} USDC would sit at your deposit address uncredited. {plan['why']}")
     plan["amountUsd"] = amount
     return plan
 
@@ -1248,11 +1273,7 @@ def farm_quote(owner, market, margin, leverage, move_pct, budget):
     if wipeout <= move:
         raise Refused(f"at {leverage}x the losing leg is wiped out at about {wipeout * 100:.2f}%, before the "
                       f"{move_pct:g}% exit: lower the leverage to {int(1 / (move + FARM_MAINTENANCE))}x or less")
-    acct = account(owner)
-    available = acct["availableUsd"]
     uses = 2 * margin
-    if uses > available + 1e-9:
-        raise Refused(f"a cycle holds ${uses:,.2f} (2 legs x ${margin:g}); ${available:,.2f} is available")
 
     if mk["winFeeRate"] is None:
         raise Refused("cannot read Papertrade's win fee, so a cycle's cost is unknown")
@@ -1262,6 +1283,14 @@ def farm_quote(owner, market, margin, leverage, move_pct, budget):
     cost = loss - gain
     if budget < cost:
         raise Refused(f"a budget of ${budget:,.2f} is less than one cycle (${cost:,.2f})")
+    # The duty stops once a cycle no longer fits in availableUsd, and each cycle's cost comes
+    # out of it, so the whole budget runs only on the cycle's hold plus the budget.
+    funds = round(uses + budget, 2)
+    available = account(owner)["availableUsd"]
+    if uses > available + 1e-9:
+        plan = deposit_plan(owner, target=funds)
+        raise Refused(f"a cycle holds ${uses:,.2f} (2 legs x ${margin:g}) and the budget is ${budget:,.2f}, so the "
+                      f"farm needs ${funds:,.2f}. {plan['why']}")
     rate = _farm_paper_rate(owner)
     paper = loss * FARM_MINT_SHARE * rate if rate else None
     safe = int(1 / (move + FARM_MAINTENANCE + FARM_QUEUE_ROOM))
@@ -1271,8 +1300,8 @@ def farm_quote(owner, market, margin, leverage, move_pct, budget):
     warnings = []
     if leverage > safe:
         warnings.append(f"At {leverage}x the losing leg is wiped out only {(wipeout - move) * 100:.2f}% past the "
-                        f"exit. The farm looks once a minute and a close can wait up to a minute in Papertrade's "
-                        f"queue, so a fast move can wipe it out first. {safe}x or lower leaves "
+                        f"exit. The farm looks once a minute and Papertrade's queue can hold a close for minutes "
+                        f"(20 once), so a fast move can wipe it out first. {safe}x or lower leaves "
                         f"{FARM_QUEUE_ROOM * 100:.1f}% of room.")
     room = {"long": m["longRoomUsd"], "short": m["shortRoomUsd"]}
     full = [side for side in room if room[side] is not None and room[side] < notional]
@@ -1281,6 +1310,12 @@ def farm_quote(owner, market, margin, leverage, move_pct, budget):
         warnings.append(f"Papertrade is full on {m['symbol']} {' and '.join(s + 's' for s in full)} right now: each "
                         f"leg is ${notional:,.0f}, and there is room for {left}. The farm waits and starts once "
                         f"both sides have room, which may take a while.")
+    if available + 1e-9 < funds:
+        fit = int((available - uses) // cost) + 1
+        plan = deposit_plan(owner, target=funds)
+        warnings.append(f"Only about {fit} of the {cycles} cycles fit in your ${available:,.2f}: the farm stops once "
+                        f"a cycle's ${uses:,.2f} no longer fits. Deposit at least ${plan['sendAtLeastUsd']:g} first "
+                        f"to run the whole budget.")
     if rate is None:
         warnings.append("PAPER per cycle is unknown until this account has closed a losing position: "
                         "Papertrade does not publish its mint rate.")
@@ -1292,7 +1327,7 @@ def farm_quote(owner, market, margin, leverage, move_pct, budget):
         "winningKeepsPct": round(gain / loss * 100, 1), "winFeePct": round(mk["winFeeRate"] * 100, 2),
         "costPerCycleUsd": round(cost, 2), "paperPerCycle": round(paper) if paper else None,
         "paperPerUsdLost": rate, "costPer1kPaperUsd": round(cost / paper * 1000, 2) if paper else None,
-        "availableUsd": available, "cyclesForBudget": cycles,
+        "availableUsd": available, "farmNeedsUsd": funds, "cyclesForBudget": cycles,
         "paperForBudget": round(paper * cycles) if paper else None,
         "markPrice": mid or None,
         "exitUpPrice": round(mid * (1 + move), 2) if mid else None,
@@ -1307,7 +1342,8 @@ def farm_quote(owner, market, margin, leverage, move_pct, budget):
                       "This buys PAPER with fees; it is not a return, and I can't tell you what PAPER is worth."),
         "badCase": (f"If {m['symbol']} moves more than {wipeout * 100:.2f}% before a close goes through, the losing "
                     f"leg is wiped out: up to {money(margin)} that cycle instead of {money(cost)}, even past "
-                    f"your budget."),
+                    f"your budget. Papertrade's queue can hold a close for minutes, so this can happen "
+                    f"even after the farm has sent it."),
         "warnings": warnings,
     }
 
@@ -1344,6 +1380,17 @@ def _refresh_duty_copy():
         pass
 
 
+def send(body_file):
+    """POST one prepared bodyFile to /intents, once. Only a duty uses it: a chat sends with the
+    curl in SKILL.md, where the owner can see the request go out."""
+    if not IN_DUTY:
+        raise Refused("send is for a duty; in a chat, send the bodyFile with the curl in SKILL.md")
+    with open(body_file) as f:
+        body = json.load(f)
+    status, text = _http(API + "/intents", body, timeout=60)
+    return {"status": str(status), "answer": text}
+
+
 def duty_helper(owner):
     if not _load_key(owner):
         raise Refused("no session key yet: register one first (SKILL.md step 2); a duty has nothing to sign with")
@@ -1376,6 +1423,7 @@ def main(argv):
     dp = sub.add_parser("deposit-plan")
     dp.add_argument("--owner", required=True)
     dp.add_argument("--amount", type=float, help="USDC the owner wants to send from Base")
+    dp.add_argument("--target", type=float, help="USDC the owner needs available after it lands")
     for name in ("history", "cashflows"):
         hp = sub.add_parser(name)
         hp.add_argument("--owner", required=True)
@@ -1391,6 +1439,7 @@ def main(argv):
         o.add_argument("--margin", required=True, type=float, help="USD of margin")
         o.add_argument("--leverage", required=True, type=int)
     sub.add_parser("duty-helper").add_argument("--owner", required=True)
+    sub.add_parser("send").add_argument("--body-file", required=True)
     fq = sub.add_parser("farm-quote")
     fq.add_argument("--owner", required=True)
     fq.add_argument("--market", required=True)
@@ -1412,6 +1461,8 @@ def main(argv):
         return config(a.refresh)
     if a.cmd == "markets":
         return markets()
+    if a.cmd == "send":
+        return send(a.body_file)
     owner = _owner(a.owner)
     if a.cmd == "account":
         return account(owner)
@@ -1454,7 +1505,7 @@ def main(argv):
         primary = PAPER_COMMANDS[op]
         return owner_body(owner, primary, a.signature, PAPER_TYPES[primary])
     if a.cmd == "deposit-plan":
-        return deposit_plan(owner, a.amount)
+        return deposit_plan(owner, a.amount, a.target)
     if a.cmd == "history":
         return history(owner, a.limit)
     if a.cmd == "cashflows":

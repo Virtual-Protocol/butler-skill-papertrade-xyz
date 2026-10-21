@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.3.1
+
+- **The farm files from a template.** Found live: asked to start a farm, a Butler tried
+  four times to file the 226-line farm program by hand and was refused each time
+  (`invalid_payload`: title keys, `statusTemplate`, `statusPlan`/`statusSeen`, a bare
+  `{next}`), so no farm started. The program now ships as the duty template
+  `papertrade-farm@1` (`templates/papertrade-farm` in this repo, listed in butler-skills
+  `templates.json` with that `path`), and `references/farm.md` files it with a recipe
+  ref, a timer, a title and six settings.
+  The template words its own status line, so there is no status preview to pass.
+- **"Stop farming" closes the legs.** Found live: asked to stop, a Butler disabled the
+  farm and left both legs open, telling the owner to close them in the Papertrade app;
+  the losing leg was at -$5 and drifting toward its wipe-out. The farm now stops itself:
+  the Butler sets its `STOP` setting, and the farm closes every leg it opened, waits for
+  Papertrade to close them, and ends with a summary. `farm.md` forbids pausing a farm to
+  stop it.
+- **The bad case says the queue can be slow.** Found live: the farm sent its close
+  within seconds of the move, and Papertrade held it for 20 minutes; the losing leg was
+  wiped out at 0.96% meanwhile. `farm-quote`'s `badCase` now says a close can wait minutes
+  in the queue, and its leverage warning no longer says "up to a minute".
+- The helper's new `send` posts one `bodyFile` to `/intents` from inside a duty only; a
+  chat still sends with the `curl` in `SKILL.md`. A template may name no URL.
+
+- **A deposit for a farm now lands enough to start it.** Found live: a $20 deposit for a
+  $10-per-leg farm landed $19.88, the farm could not open its $20 cycle, and the only fix
+  was another 11 USDC (Papertrade credits nothing under 10). `deposit-plan --target <USD>`
+  returns the least to send so that much is available after it lands: the gap plus the
+  bridge fee and any first-arrival fee, never under the credit minimum. `farm-quote`
+  refuses a cycle that does not fit `availableUsd` with that deposit already worked out,
+  and returns `farmNeedsUsd` (a cycle's hold plus the budget); when only part of the
+  budget fits, it warns how many cycles will run before the farm stops.
+
 ## 1.3.0
 
 - **Papertrade's open-interest cap.** `markets` reports `longRoomUsd` and `shortRoomUsd`,
